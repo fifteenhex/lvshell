@@ -44,7 +44,7 @@
 #define LV_DISP_DEF_REFR_PERIOD 30
 #define LV_INDEV_DEF_READ_PERIOD 30
 #define LV_TICK_CUSTOM 0
-#define LV_DPI_DEF 130     /*[px/inch]*/
+#define LV_DPI_DEF 260     /*[px/inch]*/
 #define LV_DRAW_COMPLEX 1
 #if LV_DRAW_COMPLEX != 0
 
@@ -127,8 +127,8 @@
 #define LV_USE_ASSERT_NULL          1   /*Check if the parameter is NULL. (Very fast, recommended)*/
 #define LV_USE_ASSERT_MALLOC        1   /*Checks is the memory is successfully allocated or no. (Very fast, recommended)*/
 #define LV_USE_ASSERT_STYLE         1   /*Check if the styles are properly initialized. (Very fast, recommended)*/
-#define LV_USE_ASSERT_MEM_INTEGRITY 1   /*Check the integrity of `lv_mem` after critical operations. (Slow)*/
-#define LV_USE_ASSERT_OBJ           1   /*Check the object's type and existence (e.g. not deleted). (Slow)*/
+#define LV_USE_ASSERT_MEM_INTEGRITY 0  /*Check the integrity of `lv_mem` after critical operations. (Slow)*/
+#define LV_USE_ASSERT_OBJ           0   /*Check the object's type and existence (e.g. not deleted). (Slow)*/
 
 /*Add a custom handler when assert happens e.g. to restart the MCU*/
 #define LV_ASSERT_HANDLER_INCLUDE <stdint.h>
@@ -322,33 +322,19 @@
 #endif  /*LV_USE_CALENDAR*/
 
 #define LV_USE_CHART      1
-
-#define LV_USE_COLORWHEEL 1
-
+#define LV_USE_COLORWHEEL 0
 #define LV_USE_IMGBTN     1
-
 #define LV_USE_KEYBOARD   1
-
 #define LV_USE_LED        1
-
 #define LV_USE_LIST       1
-
 #define LV_USE_MENU       1
-
 #define LV_USE_METER      1
-
 #define LV_USE_MSGBOX     1
-
 #define LV_USE_SPINBOX    1
-
 #define LV_USE_SPINNER    1
-
 #define LV_USE_TABVIEW    1
-
 #define LV_USE_TILEVIEW   1
-
 #define LV_USE_WIN        1
-
 #define LV_USE_SPAN       1
 #if LV_USE_SPAN
     /*A line text can contain maximum num of span descriptor */
@@ -364,7 +350,7 @@
 #if LV_USE_THEME_DEFAULT
 
     /*0: Light mode; 1: Dark mode*/
-    #define LV_THEME_DEFAULT_DARK 0
+    #define LV_THEME_DEFAULT_DARK 1
 
     /*1: Enable grow on press*/
     #define LV_THEME_DEFAULT_GROW 1
@@ -411,20 +397,8 @@
     #define LV_FS_POSIX_CACHE_SIZE  0   /*>0 to cache this number of bytes in lv_fs_read()*/
 #endif
 
-/*API for CreateFile, ReadFile, etc*/
 #define LV_USE_FS_WIN32 0
-#if LV_USE_FS_WIN32
-    #define LV_FS_WIN32_LETTER  '\0'    /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
-    #define LV_FS_WIN32_PATH ""         /*Set the working directory. File/directory paths will be appended to it.*/
-    #define LV_FS_WIN32_CACHE_SIZE 0    /*>0 to cache this number of bytes in lv_fs_read()*/
-#endif
-
-/*API for FATFS (needs to be added separately). Uses f_open, f_read, etc*/
 #define LV_USE_FS_FATFS  0
-#if LV_USE_FS_FATFS
-    #define LV_FS_FATFS_LETTER '\0'     /*Set an upper cased letter on which the drive will accessible (e.g. 'A')*/
-    #define LV_FS_FATFS_CACHE_SIZE 0    /*>0 to cache this number of bytes in lv_fs_read()*/
-#endif
 
 /*PNG decoder library*/
 #define LV_USE_PNG 1
@@ -438,9 +412,7 @@
 
 /*GIF decoder library*/
 #define LV_USE_GIF 1
-
-/*QR code library*/
-#define LV_USE_QRCODE 1
+#define LV_USE_QRCODE 0
 
 /*FreeType library*/
 #define LV_USE_FREETYPE 0
@@ -461,63 +433,24 @@
 
 /*Rlottie library*/
 #define LV_USE_RLOTTIE 0
-
-/*FFmpeg library for image decoding and playing videos
- *Supports all major image formats so do not enable other image decoder with it*/
 #define LV_USE_FFMPEG  0
-#if LV_USE_FFMPEG
-    /*Dump input information to stderr*/
-    #define LV_FFMPEG_AV_DUMP_FORMAT 0
-#endif
-
-/*-----------
- * Others
- *----------*/
 
 /*1: Enable API to take snapshot for object*/
 #define LV_USE_SNAPSHOT 1
 
 /*1: Enable Monkey test*/
-#define LV_USE_MONKEY   1
+#define LV_USE_MONKEY   0
 
 /*1: Enable grid navigation*/
 #define LV_USE_GRIDNAV  1
-
-/*==================
-* EXAMPLES
-*==================*/
-
-/*Enable the examples to be built with the library*/
-#define LV_BUILD_EXAMPLES 1
-
-/*===================
- * DEMO USAGE
- ====================*/
-
-/*Show some widget. It might be required to increase `LV_MEM_SIZE` */
-#define LV_USE_DEMO_WIDGETS        1
-#if LV_USE_DEMO_WIDGETS
-#define LV_DEMO_WIDGETS_SLIDESHOW  0
-#endif
-
-/*Demonstrate the usage of encoder and keyboard*/
-#define LV_USE_DEMO_KEYPAD_AND_ENCODER     1
+#define LV_BUILD_EXAMPLES	0
+#define LV_USE_DEMO_WIDGETS	0
+#define LV_USE_DEMO_KEYPAD_AND_ENCODER     0
 
 /*Benchmark your system*/
-#define LV_USE_DEMO_BENCHMARK   1
-
-/*Stress test for LVGL*/
-#define LV_USE_DEMO_STRESS      1
-
-/*Music player demo*/
-#define LV_USE_DEMO_MUSIC       1
-#if LV_USE_DEMO_MUSIC
-# define LV_DEMO_MUSIC_SQUARE       0
-# define LV_DEMO_MUSIC_LANDSCAPE    0
-# define LV_DEMO_MUSIC_ROUND        0
-# define LV_DEMO_MUSIC_LARGE        0
-# define LV_DEMO_MUSIC_AUTO_PLAY    0
-#endif
+#define LV_USE_DEMO_BENCHMARK	0
+#define LV_USE_DEMO_STRESS	0
+#define LV_USE_DEMO_MUSIC	0
 
 /*--END OF LV_CONF_H--*/
 

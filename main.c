@@ -1,12 +1,41 @@
-#define _DEFAULT_SOURCE /* needed for usleep() */
+/* needed for usleep() */
+#define _DEFAULT_SOURCE
 #include <stdlib.h>
 #include <unistd.h>
-#define SDL_MAIN_HANDLED /*To fix SDL's "undefined reference to WinMain" issue*/
+/*To fix SDL's "undefined reference to WinMain" issue*/
+#define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include "lvgl/lvgl.h"
 #include "lvgl/examples/lv_examples.h"
 #include "lvgl/demos/lv_demos.h"
 #include "lv_drivers/sdl/sdl.h"
+
+struct toplevel {
+	const char *title;
+};
+
+struct context {
+	struct toplevel *toplevel;
+	unsigned num_toplevel;
+};
+
+static struct context cntx;
+
+static lv_indev_drv_t indev_keyboard = { };
+
+static void hal_init_input(void)
+{
+	lv_indev_t *kb_indev;
+	lv_group_t *g = lv_group_create();
+
+	lv_group_set_default(g);
+	lv_indev_drv_init(&indev_keyboard);
+	kb_indev = lv_indev_drv_register(&indev_keyboard);
+	/* Encoder seems wrong but this gives the best fit */
+	indev_keyboard.type = LV_INDEV_TYPE_ENCODER;
+	indev_keyboard.read_cb = sdl_keyboard_read;
+	lv_indev_set_group(kb_indev, g);
+}
 
 static void hal_init(void)
 {
@@ -26,42 +55,79 @@ static void hal_init(void)
 	disp_drv.hor_res = SDL_HOR_RES;
 	disp_drv.ver_res = SDL_VER_RES;
 
-	lv_disp_t * disp = lv_disp_drv_register(&disp_drv);
-	lv_theme_t * th = lv_theme_default_init(disp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED), LV_THEME_DEFAULT_DARK, LV_FONT_DEFAULT);
+	lv_disp_t *disp = lv_disp_drv_register(&disp_drv);
+	lv_theme_t *th = lv_theme_default_init(disp,
+			lv_palette_main(LV_PALETTE_BLUE),
+			lv_palette_main(LV_PALETTE_RED),
+			LV_THEME_DEFAULT_DARK, LV_FONT_DEFAULT);
 	lv_disp_set_theme(disp, th);
 
-	lv_group_t * g = lv_group_create();
-	lv_group_set_default(g);
+	hal_init_input();
+}
 
-	/* Add the mouse as input device
-	 * Use the 'mouse' driver which reads the PC's mouse*/
-	static lv_indev_drv_t indev_drv_1;
-	lv_indev_drv_init(&indev_drv_1); /*Basic initialization*/
-	indev_drv_1.type = LV_INDEV_TYPE_POINTER;
+static void quake_handler(lv_event_t *e)
+{
+	lv_event_code_t code = lv_event_get_code(e);
 
-	/*This function will be called periodically (by the library) to get the mouse position and state*/
-	indev_drv_1.read_cb = sdl_mouse_read;
-	lv_indev_t *mouse_indev = lv_indev_drv_register(&indev_drv_1);
+	if (code == LV_EVENT_CLICKED) {
+	}
+}
 
-	static lv_indev_drv_t indev_drv_2;
-	lv_indev_drv_init(&indev_drv_2); /*Basic initialization*/
-	indev_drv_2.type = LV_INDEV_TYPE_KEYPAD;
-	indev_drv_2.read_cb = sdl_keyboard_read;
-	lv_indev_t *kb_indev = lv_indev_drv_register(&indev_drv_2);
-	lv_indev_set_group(kb_indev, g);
+static void doom_handler(lv_event_t *e)
+{
+	lv_event_code_t code = lv_event_get_code(e);
 
-	static lv_indev_drv_t indev_drv_3;
-	lv_indev_drv_init(&indev_drv_3); /*Basic initialization*/
-	indev_drv_3.type = LV_INDEV_TYPE_ENCODER;
-	indev_drv_3.read_cb = sdl_mousewheel_read;
-	lv_indev_t * enc_indev = lv_indev_drv_register(&indev_drv_3);
-	lv_indev_set_group(enc_indev, g);
+	if (code == LV_EVENT_CLICKED) {
+		LV_LOG_USER("Clicked");
+	}
+}
 
-	/*Set a cursor for the mouse*/
-	LV_IMG_DECLARE(mouse_cursor_icon); /*Declare the image file.*/
-	lv_obj_t * cursor_obj = lv_img_create(lv_scr_act()); /*Create an image object for the cursor */
-	lv_img_set_src(cursor_obj, &mouse_cursor_icon);           /*Set the image source*/
-	lv_indev_set_cursor(mouse_indev, cursor_obj);             /*Connect the image  object to the driver*/
+static void setup_carousell()
+{
+	lv_obj_t *panel = lv_obj_create(lv_scr_act());
+	lv_obj_set_size(panel, lv_pct(100), lv_pct(60));
+	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
+	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
+	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+
+	for (int i = 0; i < cntx.num_toplevel; i++) {
+		lv_obj_t *btn = lv_btn_create(panel);
+		lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
+		lv_obj_t *label = lv_label_create(btn);
+		lv_label_set_text(label, cntx.toplevel[i].title);
+		lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
+	}
+
+	lv_obj_update_snap(panel, LV_ANIM_ON);
+
+}
+
+static void setup_screen_tag()
+{
+	lv_obj_t *ltr_label = lv_label_create(lv_scr_act());
+	lv_label_set_text(ltr_label,
+			"Miyoo Mini - Less shitty kernel edition.");
+	lv_obj_set_style_text_font(ltr_label, &lv_font_montserrat_16, 0);
+	lv_obj_set_width(ltr_label, LV_SIZE_CONTENT);
+	lv_obj_align(ltr_label, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+}
+
+static void setup_ui()
+{
+	setup_screen_tag();
+	setup_carousell();
+
+#if 0
+	{
+		lv_obj_t *btn1 = lv_btn_create(lv_scr_act());
+		lv_obj_add_event_cb(btn1, quake_handler, LV_EVENT_ALL, NULL);
+		lv_obj_align(btn1, LV_ALIGN_CENTER, 0, -40);
+
+		lv_obj_t *label = lv_label_create(btn1);
+		lv_label_set_text(label, "Play Quake");
+		lv_obj_center(label);
+	}
+#endif
 }
 
 int main(int argc, char **argv)
@@ -69,12 +135,21 @@ int main(int argc, char **argv)
 	lv_init();
 	hal_init();
 
-	lv_demo_widgets();
+	struct toplevel tops[] = {
+			{ .title = "Chocolate Doom - Doom2" },
+			{ .title = "cppquake - Quake" },
+			{ .title = "Settings" },
+	};
 
-	while(1) {
+	cntx.toplevel = tops;
+	cntx.num_toplevel = sizeof(tops) / sizeof(tops[0]);
+
+	setup_ui();
+
+	while (1) {
 		/*
 		 * Periodically call the lv_task handler.
-       		 * It could be done in a timer interrupt or an OS task too.
+		 * It could be done in a timer interrupt or an OS task too.
 		 */
 		lv_timer_handler();
 		usleep(5 * 1000);
