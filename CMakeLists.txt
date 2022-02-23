@@ -13,7 +13,7 @@ file(GLOB_RECURSE INCLUDES "./*.h" )
 add_subdirectory(lvgl)
 add_subdirectory(lv_drivers)
 
-add_executable(lvshell main.c ${SOURCES} ${INCLUDES})
+add_executable(lvshell main.c util.c ${SOURCES} ${INCLUDES})
 add_compile_definitions(LV_CONF_INCLUDE_SIMPLE)
 target_link_libraries(lvshell PRIVATE PkgConfig::sdl2 lvgl lvgl::examples lvgl::demos lvgl::drivers)
 install(TARGETS lvshell)

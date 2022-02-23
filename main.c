@@ -10,13 +10,32 @@
 #include "lvgl/demos/lv_demos.h"
 #include "lv_drivers/sdl/sdl.h"
 
+#include "util.h"
+
+enum toplevel_type {
+	TOPLEVELT_RUNCMD,
+	TOPLEVELT_SETTINGS,
+	TOPLEVELT_ABOUT,
+};
+
+struct toplevel_data_runcmd {
+	const char* executable;
+	const char * const *args;
+	const char *dir;
+};
+
 struct toplevel {
+	enum toplevel_type type;
 	const char *title;
+	union {
+		struct toplevel_data_runcmd runcmd;
+	};
 };
 
 struct context {
 	struct toplevel *toplevel;
 	unsigned num_toplevel;
+	pid_t child_pid;
 };
 
 static struct context cntx;
@@ -65,21 +84,35 @@ static void hal_init(void)
 	hal_init_input();
 }
 
-static void quake_handler(lv_event_t *e)
+static void top_handler(lv_event_t *e)
 {
 	lv_event_code_t code = lv_event_get_code(e);
+	struct toplevel *tl = e->user_data;
 
-	if (code == LV_EVENT_CLICKED) {
+	//printf("code: %d\n", code);
+	if (code == LV_EVENT_PRESSED) {
+		switch (tl->type) {
+		case TOPLEVELT_RUNCMD:
+			if (cntx.child_pid)
+				printf("Current child is still running...\n");
+			else
+				cntx.child_pid = util_start_cmd(tl->runcmd.executable,
+						tl->runcmd.args,
+						tl->runcmd.dir);
+			break;
+		default:
+			printf("Unhandled press event for %s\n", tl->title);
+			break;
+		}
 	}
 }
 
-static void doom_handler(lv_event_t *e)
+static void setup_battery(void)
 {
-	lv_event_code_t code = lv_event_get_code(e);
-
-	if (code == LV_EVENT_CLICKED) {
-		LV_LOG_USER("Clicked");
-	}
+	lv_obj_t *batbar = lv_bar_create(lv_scr_act());
+	lv_obj_set_size(batbar, 35, 10);
+	lv_obj_align(batbar, LV_ALIGN_TOP_RIGHT, -5, 5);
+	lv_bar_set_value(batbar, 50, LV_ANIM_OFF);
 }
 
 static void setup_carousell()
@@ -93,13 +126,14 @@ static void setup_carousell()
 	for (int i = 0; i < cntx.num_toplevel; i++) {
 		lv_obj_t *btn = lv_btn_create(panel);
 		lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
+		lv_obj_add_event_cb(btn, top_handler, LV_EVENT_ALL,
+				&cntx.toplevel[i]);
 		lv_obj_t *label = lv_label_create(btn);
 		lv_label_set_text(label, cntx.toplevel[i].title);
 		lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
 	}
 
 	lv_obj_update_snap(panel, LV_ANIM_ON);
-
 }
 
 static void setup_screen_tag()
@@ -114,31 +148,46 @@ static void setup_screen_tag()
 
 static void setup_ui()
 {
+	setup_battery();
 	setup_screen_tag();
 	setup_carousell();
-
-#if 0
-	{
-		lv_obj_t *btn1 = lv_btn_create(lv_scr_act());
-		lv_obj_add_event_cb(btn1, quake_handler, LV_EVENT_ALL, NULL);
-		lv_obj_align(btn1, LV_ALIGN_CENTER, 0, -40);
-
-		lv_obj_t *label = lv_label_create(btn1);
-		lv_label_set_text(label, "Play Quake");
-		lv_obj_center(label);
-	}
-#endif
 }
+
+static const char *chocodoom_args[] = { "chocolate-doom", "-iwad", "/data/chocodoom/doom2/DOOM2.WAD", NULL };
+static const char *cppquake_args[] = { "sdlquake", NULL };
 
 int main(int argc, char **argv)
 {
 	lv_init();
 	hal_init();
 
+
 	struct toplevel tops[] = {
-			{ .title = "Chocolate Doom - Doom2" },
-			{ .title = "cppquake - Quake" },
-			{ .title = "Settings" },
+		{
+			.type = TOPLEVELT_RUNCMD,
+			.title = "Chocolate Doom - Doom2",
+			.runcmd = {
+				.executable = "/usr/bin/chocolate-doom",
+				.args = chocodoom_args,
+			},
+		},
+		{
+			.type = TOPLEVELT_RUNCMD,
+			.title = "cppquake - Quake",
+			.runcmd = {
+				.executable = "/usr/bin/sdlquake",
+				.args = cppquake_args,
+				.dir = "/data/quake/"
+			},
+		},
+		{
+			.type = TOPLEVELT_SETTINGS,
+			.title = "Settings"
+		},
+		{
+			.type = TOPLEVELT_ABOUT,
+			.title = "About",
+		},
 	};
 
 	cntx.toplevel = tops;
