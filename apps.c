@@ -285,6 +285,7 @@ static void discover_scummvm(void)
  */
 #define MEDNAFEN_EXE "/usr/bin/mednafen"
 #define MGBA_EXE     "/usr/bin/mgba"
+#define VICE_EXE     "/usr/bin/x64sc"   /* VICE Commodore 64 emulator */
 
 static const char *const ext_nes[]  = { ".nes", ".fds", NULL };
 static const char *const ext_gen[]  = { ".md", ".gen", ".smd", ".bin", NULL };
@@ -297,6 +298,7 @@ static const char *const ext_pce[]  = { ".pce", NULL };
 static const char *const ext_lynx[] = { ".lnx", NULL };
 static const char *const ext_ngp[]  = { ".ngp", ".ngc", NULL };
 static const char *const ext_ws[]   = { ".ws", ".wsc", NULL };
+static const char *const ext_c64[]  = { ".d64", ".d81", ".g64", ".t64", ".prg", ".crt", NULL };
 
 static const struct emu_system {
 	const char        *dir;    /* /data/roms/<dir> */
@@ -315,6 +317,7 @@ static const struct emu_system {
 	{ "lynx",       "Lynx",             MEDNAFEN_EXE, ext_lynx },
 	{ "ngp",        "Neo Geo Pocket",   MEDNAFEN_EXE, ext_ngp  },
 	{ "wonderswan", "WonderSwan",       MEDNAFEN_EXE, ext_ws   },
+	{ "c64",        "Commodore 64",     VICE_EXE,     ext_c64  },
 };
 #define NUM_SYSTEMS ((int)(sizeof(systems) / sizeof(systems[0])))
 
@@ -339,6 +342,11 @@ static void rom_found(const char *dir, const char *name)
 		 * fullscreen so its SW renderer stretches the frame to fill the
 		 * panel (SDL_RenderCopy with a NULL dst scales to the window). */
 		argv[a++] = "-f";
+	} else if (!strcmp(cur_sys->emu, VICE_EXE)) {
+		/* VICE: fill the panel (-VICIIfull enables the VIC-II chip's
+		 * fullscreen) and boot straight into the image (-autostart). */
+		argv[a++] = "-VICIIfull";
+		argv[a++] = "-autostart";
 	}
 	argv[a++] = path;
 	argv[a] = NULL;
