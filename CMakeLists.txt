@@ -25,7 +25,8 @@ set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory(lvgl)
 
-add_executable(lvshell main.c apps.c util.c music.c input.c)
+add_executable(lvshell main.c apps.c util.c music.c input.c
+               background.c ticker.c buttontest.c)
 target_link_libraries(lvshell PRIVATE lvgl ${SDL2_LIBRARIES})
 install(TARGETS lvshell RUNTIME DESTINATION bin)
 

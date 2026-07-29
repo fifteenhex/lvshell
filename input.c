@@ -129,3 +129,12 @@ void input_set_group(lv_group_t *group)
 	if (in_indev)
 		lv_indev_set_group(in_indev, group);
 }
+
+int input_get_fds(int *out, int max)
+{
+	int n = in_nfds < max ? in_nfds : max;
+
+	for (int i = 0; i < n; i++)
+		out[i] = in_fds[i];
+	return n;
+}
