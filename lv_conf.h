@@ -40,7 +40,10 @@
  * - LV_STDLIB_RTTHREAD:    RT-Thread implementation
  * - LV_STDLIB_CUSTOM:      Implement the functions externally
  */
-#define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
+/* Use the C library's malloc: this is a Linux target with plenty of RAM, and
+ * image decoders (PNG icons) need buffers far larger than the small builtin
+ * heap (LV_MEM_SIZE), which otherwise fails with "memory allocation failed". */
+#define LV_USE_STDLIB_MALLOC    LV_STDLIB_CLIB
 
 /** Possible values
  * - LV_STDLIB_BUILTIN:     LVGL's built in implementation
