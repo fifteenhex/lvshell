@@ -334,6 +334,11 @@ static void rom_found(const char *dir, const char *name)
 	if (!strcmp(cur_sys->emu, MEDNAFEN_EXE)) {
 		argv[a++] = "-fs";
 		argv[a++] = "1";
+	} else if (!strcmp(cur_sys->emu, MGBA_EXE)) {
+		/* mgba otherwise opens a tiny native-size (240x160) window; go
+		 * fullscreen so its SW renderer stretches the frame to fill the
+		 * panel (SDL_RenderCopy with a NULL dst scales to the window). */
+		argv[a++] = "-f";
 	}
 	argv[a++] = path;
 	argv[a] = NULL;
