@@ -863,20 +863,27 @@ static void ctl_poll(void)
  * effectively the animation/refresh cadence) or a bit sooner, but wake up
  * immediately if input arrives on the control FIFO or an input device. This
  * keeps the UI responsive while not busy-spinning like a fixed usleep.
+ *
+ * With 'watch_input' false (while a game owns the display) the input devices
+ * are NOT polled: nobody drains them then, so their queued events would keep
+ * poll() returning instantly and spin the CPU. Only the control FIFO is watched
+ * so remote commands (e.g. "kill") still wake us.
  */
 #define LOOP_MAX_FDS 20
 
-static void loop_wait(uint32_t timeout_ms)
+static void loop_wait(uint32_t timeout_ms, bool watch_input)
 {
 	struct pollfd fds[LOOP_MAX_FDS];
 	int devfds[LOOP_MAX_FDS - 1];
 	int n = 0, ndev, i;
 
-	ndev = input_get_fds(devfds, LOOP_MAX_FDS - 1);
-	for (i = 0; i < ndev; i++) {
-		fds[n].fd = devfds[i];
-		fds[n].events = POLLIN;
-		n++;
+	if (watch_input) {
+		ndev = input_get_fds(devfds, LOOP_MAX_FDS - 1);
+		for (i = 0; i < ndev; i++) {
+			fds[n].fd = devfds[i];
+			fds[n].events = POLLIN;
+			n++;
+		}
 	}
 	if (ctl_fd >= 0) {
 		fds[n].fd = ctl_fd;
@@ -946,7 +953,7 @@ int main(int argc, char **argv)
 		if (cntx.child_pid > 0) {
 			/* Keep sampling performance so the graph records the game. */
 			performance_poll(true);
-			loop_wait(100);
+			loop_wait(100, false);   /* don't spin on undrained input */
 			continue;
 		}
 
@@ -962,7 +969,7 @@ int main(int argc, char **argv)
 		wait = lv_timer_handler();
 		if (wait > 30)
 			wait = 30;
-		loop_wait(wait);
+		loop_wait(wait, true);
 	}
 
 	return 0;
