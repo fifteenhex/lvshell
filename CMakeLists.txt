@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.12.4)
 project(lvshell C)
 set(CMAKE_C_STANDARD 11)
 
+# Debug logging: writes discovery/decoder diagnostics to /tmp/lvshell.dbg and
+# routes LVGL's own log there too. Applied before add_subdirectory(lvgl) so it
+# also reaches lv_conf.h. Off by default; enable with -DLVSHELL_DEBUG=ON.
+option(LVSHELL_DEBUG "Enable lvshell debug logging to /tmp/lvshell.dbg" OFF)
+if(LVSHELL_DEBUG)
+    add_compile_definitions(LVSHELL_DEBUG)
+endif()
+
 find_package(PkgConfig REQUIRED)
 # Not IMPORTED_TARGET: SDL2's Cflags pull in directfb's (via the DirectFB video
 # driver) whose .pc can carry a non-relocatable include path that trips CMake's

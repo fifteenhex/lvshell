@@ -30,6 +30,37 @@ struct context {
 
 static struct context cntx;
 
+/*
+ * Debug logging. Enabled with -DLVSHELL_DEBUG (the LVSHELL_DEBUG CMake option),
+ * which also turns on LVGL's own logging in lv_conf.h. Writes to a file so it
+ * survives lvshell being started as a background daemon with stdout/stderr
+ * redirected to /dev/null, and DirectFB taking over the console.
+ */
+#ifdef LVSHELL_DEBUG
+static FILE *g_dbg;
+#define DBG(...) do { if (g_dbg) { fprintf(g_dbg, __VA_ARGS__); fflush(g_dbg); } } while (0)
+
+static void dbg_log_cb(lv_log_level_t level, const char *buf)
+{
+	(void)level;
+	DBG("LVGL: %s", buf);
+}
+
+static void dbg_init(void)
+{
+	g_dbg = fopen("/tmp/lvshell.dbg", "w");
+}
+
+static void dbg_init_lvgl(void)
+{
+	lv_log_register_print_cb(dbg_log_cb);
+}
+#else
+#define DBG(...) do { } while (0)
+static void dbg_init(void) { }
+static void dbg_init_lvgl(void) { }
+#endif
+
 static void hal_init_input(void)
 {
 	lv_group_t *g = lv_group_create();
@@ -170,6 +201,15 @@ static void setup_carousell(lv_obj_t *parent)
 			lv_obj_t *img = lv_image_create(btn);
 
 			snprintf(src, sizeof(src), "L:%s", cntx.apps[i].icon);
+#ifdef LVSHELL_DEBUG
+			{
+				lv_image_header_t hdr;
+				lv_result_t ir = lv_image_decoder_get_info(src, &hdr);
+
+				DBG("icon %d: %s info=%d %dx%d\n",
+					i, src, (int)ir, (int)hdr.w, (int)hdr.h);
+			}
+#endif
 			lv_image_set_src(img, src);
 			lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 10);
 		}
@@ -484,6 +524,8 @@ static void ctl_poll(void)
 
 int main(int argc, char **argv)
 {
+	dbg_init();
+
 	/*
 	 * Discover apps before we grab the display: the ScummVM discoverer runs
 	 * "scummvm --detect", which itself opens the (single) DirectFB device.
@@ -491,6 +533,7 @@ int main(int argc, char **argv)
 	cntx.num_apps = apps_discover(&cntx.apps);
 
 	lv_init();
+	dbg_init_lvgl();
 	hal_init();
 
 	/* Offer to create the data partition on first boot if there's room. */

@@ -368,8 +368,12 @@
  * Logging
  *-----------*/
 
-/** Enable log module */
+/** Enable log module (only in debug builds; see the LVSHELL_DEBUG CMake option) */
+#ifdef LVSHELL_DEBUG
+#define LV_USE_LOG 1
+#else
 #define LV_USE_LOG 0
+#endif
 #if LV_USE_LOG
     /** Set value to one of the following levels of logging detail:
      *  - LV_LOG_LEVEL_TRACE    Log detailed information.
