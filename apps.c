@@ -209,22 +209,18 @@ static void scummvm_icon(const char *gameid, char *out, size_t outlen)
 	out[0] = 0;
 }
 
-/*
- * ScummVM: ask it which games live under the data dir (no hardcoded game list)
- * and add one entry each, launching the game directly instead of the launcher.
- */
-static void discover_scummvm(void)
+/* Ask ScummVM which games live under 'dir' and add one entry each, launching
+ * the game directly instead of the launcher. */
+static void scummvm_detect_path(const char *exe, const char *dir)
 {
-	static const char *exe = "/usr/bin/scummvm";
+	char cmd[256];
 	FILE *fp;
 	char line[1024];
 	bool in_table = false;
 
-	if (!path_exists(exe))
-		return;
-
-	cur_group = "ScummVM";
-	fp = popen("scummvm --recursive --path=/data/scummvm --detect 2>/dev/null", "r");
+	snprintf(cmd, sizeof(cmd),
+		 "scummvm --recursive --path=%s --detect 2>/dev/null", dir);
+	fp = popen(cmd, "r");
 	if (!fp)
 		return;
 
@@ -256,6 +252,28 @@ static void discover_scummvm(void)
 	}
 
 	pclose(fp);
+}
+
+/*
+ * ScummVM: detect games under the user's data dir and under the bundled-games
+ * dir (where packages like the Sam & Max demo install), with no hardcoded game
+ * list.
+ */
+static void discover_scummvm(void)
+{
+	static const char *exe = "/usr/bin/scummvm";
+	static const char *dirs[] = {
+		"/data/scummvm",
+		"/usr/share/games/scummvm",   /* bundled demos */
+		NULL,
+	};
+
+	if (!path_exists(exe))
+		return;
+
+	cur_group = "ScummVM";
+	for (int i = 0; dirs[i]; i++)
+		scummvm_detect_path(exe, dirs[i]);
 }
 
 /*
