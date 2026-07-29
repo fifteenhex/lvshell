@@ -156,7 +156,8 @@ static void launch_handler(lv_event_t *e)
 			app->dir[0] ? app->dir : NULL);
 }
 
-/* Reap a finished game and resume the background music. */
+/* Reap a finished game, redraw the UI (the game left the framebuffer in its
+ * own state) and resume the background music. */
 static void game_poll(void)
 {
 	if (cntx.child_pid <= 0)
@@ -164,6 +165,7 @@ static void game_poll(void)
 	if (waitpid(cntx.child_pid, NULL, WNOHANG) != cntx.child_pid)
 		return;
 	cntx.child_pid = 0;
+	lv_obj_invalidate(lv_screen_active());   /* force a full redraw on resume */
 	music_start();
 }
 
@@ -777,9 +779,21 @@ int main(int argc, char **argv)
 		uint32_t wait;
 
 		ctl_poll();
+		game_poll();
+
+		/*
+		 * While a game owns the display, pause the UI entirely: don't run the
+		 * animations/rendering (lv_timer_handler) - that both wastes CPU the
+		 * game could use and would block in the DirectFB flush. Just wait for
+		 * the game to exit (game_poll above resumes everything when it does).
+		 */
+		if (cntx.child_pid > 0) {
+			loop_wait(100);
+			continue;
+		}
+
 		dp_poll();
 		buttontest_poll();
-		game_poll();
 		music_poll();
 		ticker_poll();
 
