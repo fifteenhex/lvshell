@@ -25,9 +25,13 @@ set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory(lvgl)
 
-add_executable(lvshell main.c apps.c util.c)
+add_executable(lvshell main.c apps.c util.c music.c)
 target_link_libraries(lvshell PRIVATE lvgl ${SDL2_LIBRARIES})
 install(TARGETS lvshell RUNTIME DESTINATION bin)
+
+# Built-in default background music (module files shipped with the shell).
+install(DIRECTORY music/ DESTINATION share/lvshell/music
+        FILES_MATCHING PATTERN "*.mod" PATTERN "*.xm" PATTERN "*.s3m" PATTERN "*.it")
 
 # Small standalone helper (no lvgl/SDL) that creates the data partition.
 add_executable(datapart datapart.c)

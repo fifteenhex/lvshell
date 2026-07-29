@@ -20,6 +20,8 @@
 
 #include "apps.h"
 #include "util.h"
+#include "debug.h"
+#include "music.h"
 
 #define LVSHELL_HOR_RES 640
 #define LVSHELL_VER_RES 480
@@ -33,14 +35,11 @@ struct context {
 static struct context cntx;
 
 /*
- * Debug logging. Enabled with -DLVSHELL_DEBUG (the LVSHELL_DEBUG CMake option),
- * which also turns on LVGL's own logging in lv_conf.h. Writes to a file so it
- * survives lvshell being started as a background daemon with stdout/stderr
- * redirected to /dev/null, and DirectFB taking over the console.
+ * Debug logging (see debug.h). The LVSHELL_DEBUG build option also turns on
+ * LVGL's own logging in lv_conf.h, which we route into the same file.
  */
 #ifdef LVSHELL_DEBUG
-static FILE *g_dbg;
-#define DBG(...) do { if (g_dbg) { fprintf(g_dbg, __VA_ARGS__); fflush(g_dbg); } } while (0)
+FILE *g_dbg;   /* referenced by the DBG() macro in debug.h */
 
 static void dbg_log_cb(lv_log_level_t level, const char *buf)
 {
@@ -58,7 +57,6 @@ static void dbg_init_lvgl(void)
 	lv_log_register_print_cb(dbg_log_cb);
 }
 #else
-#define DBG(...) do { } while (0)
 static void dbg_init(void) { }
 static void dbg_init_lvgl(void) { }
 #endif
@@ -153,8 +151,20 @@ static void launch_handler(lv_event_t *e)
 		return;
 	}
 
+	music_stop();   /* hand the audio device to the game */
 	cntx.child_pid = util_start_cmd(app->argv[0], (const char * const *)app->argv,
 			app->dir[0] ? app->dir : NULL);
+}
+
+/* Reap a finished game and resume the background music. */
+static void game_poll(void)
+{
+	if (cntx.child_pid <= 0)
+		return;
+	if (waitpid(cntx.child_pid, NULL, WNOHANG) != cntx.child_pid)
+		return;
+	cntx.child_pid = 0;
+	music_start();
 }
 
 /* The main menu is built on its own screen so a splash can show first. */
@@ -818,6 +828,7 @@ static void ctl_launch(int i)
 {
 	if (i < 0 || i >= cntx.num_apps || cntx.child_pid)
 		return;
+	music_stop();
 	cntx.child_pid = util_start_cmd(cntx.apps[i].argv[0],
 			(const char * const *)cntx.apps[i].argv,
 			cntx.apps[i].dir[0] ? cntx.apps[i].dir : NULL);
@@ -911,6 +922,10 @@ int main(int argc, char **argv)
 	build_buttontest_screen();
 	bt_open();
 
+	/* Start background chiptune music, if any modules are present. */
+	music_init();
+	music_start();
+
 	ctl_init();
 	show_splash();
 
@@ -922,6 +937,8 @@ int main(int argc, char **argv)
 		ctl_poll();
 		dp_poll();
 		bt_poll();
+		game_poll();
+		music_poll();
 		lv_timer_handler();
 		usleep(5 * 1000);
 	}
