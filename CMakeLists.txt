@@ -20,3 +20,7 @@ add_subdirectory(lvgl)
 add_executable(lvshell main.c apps.c util.c)
 target_link_libraries(lvshell PRIVATE lvgl ${SDL2_LIBRARIES})
 install(TARGETS lvshell RUNTIME DESTINATION bin)
+
+# Small standalone helper (no lvgl/SDL) that creates the data partition.
+add_executable(datapart datapart.c)
+install(TARGETS datapart RUNTIME DESTINATION bin)
