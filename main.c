@@ -1,4 +1,4 @@
-/* needed for usleep() */
+/* for strdup(), etc. */
 #define _DEFAULT_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <poll.h>
 #include <dirent.h>
 #include <linux/input.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
@@ -1078,6 +1079,30 @@ static void ctl_poll(void)
 	}
 }
 
+/*
+ * Sleep until the next LVGL work is due (its return from lv_timer_handler is
+ * effectively the animation/refresh cadence) or a bit sooner, but wake up
+ * immediately if input arrives on the control FIFO or an input device. This
+ * keeps the UI responsive while not busy-spinning like a fixed usleep.
+ */
+static void loop_wait(uint32_t timeout_ms)
+{
+	struct pollfd fds[BT_MAX_FDS + 1];
+	int n = 0;
+
+	for (int i = 0; i < bt_nfds; i++) {
+		fds[n].fd = bt_fds[i];
+		fds[n].events = POLLIN;
+		n++;
+	}
+	if (ctl_fd >= 0) {
+		fds[n].fd = ctl_fd;
+		fds[n].events = POLLIN;
+		n++;
+	}
+	poll(fds, n, (int)timeout_ms);
+}
+
 int main(int argc, char **argv)
 {
 	dbg_init();
@@ -1117,18 +1142,22 @@ int main(int argc, char **argv)
 	show_splash();
 
 	while (1) {
-		/*
-		 * Periodically call the lv_task handler.
-		 * It could be done in a timer interrupt or an OS task too.
-		 */
+		uint32_t wait;
+
 		ctl_poll();
 		dp_poll();
 		bt_poll();
 		game_poll();
 		music_poll();
 		ticker_poll();
-		lv_timer_handler();
-		usleep(5 * 1000);
+
+		/* lv_timer_handler() returns how long until it next needs to run
+		 * (small while animating, larger when idle). Cap it so the non-LVGL
+		 * pollers above (child reaping, FIFO) still run promptly. */
+		wait = lv_timer_handler();
+		if (wait > 30)
+			wait = 30;
+		loop_wait(wait);
 	}
 
 	return 0;
