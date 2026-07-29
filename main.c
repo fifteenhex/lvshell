@@ -261,6 +261,10 @@ static void build_about_screen(void)
 
 static void setup_ui(lv_obj_t *parent)
 {
+	/* The background squares fly off-screen; don't let that add a scrollbar. */
+	lv_obj_remove_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
+
 	setup_background(parent);
 	setup_battery(parent);
 	setup_screen_tag(parent);
