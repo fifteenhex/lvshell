@@ -9,6 +9,7 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <poll.h>
+#include <stdarg.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -25,6 +26,7 @@
 #include "background.h"
 #include "ticker.h"
 #include "buttontest.h"
+#include "sandbox.h"
 
 struct context {
 	const struct app_entry *apps;
@@ -60,6 +62,43 @@ static void dbg_init_lvgl(void)
 static void dbg_init(void) { }
 static void dbg_init_lvgl(void) { }
 #endif
+
+/*
+ * Event channel: lvshell emits one-line events on a FIFO so a controller can
+ * react to state changes ("ready", "launched", "exited") instead of polling
+ * with timeouts. It pairs with the control FIFO (/tmp/lvshell.ctl).
+ */
+#define EVT_PATH "/tmp/lvshell.evt"
+
+static int evt_fd = -1;
+
+static void evt_init(void)
+{
+	unlink(EVT_PATH);
+	if (mkfifo(EVT_PATH, 0666) != 0)
+		return;
+	chmod(EVT_PATH, 0666);   /* mkfifo's mode is masked by umask */
+	/* O_RDWR so writes don't fail when nobody is listening yet. */
+	evt_fd = open(EVT_PATH, O_RDWR | O_NONBLOCK);
+}
+
+static void evt_emit(const char *fmt, ...)
+{
+	char buf[160];
+	va_list ap;
+	int n;
+
+	if (evt_fd < 0)
+		return;
+	va_start(ap, fmt);
+	n = vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
+	va_end(ap);
+	if (n < 0)
+		return;
+	buf[n++] = '\n';
+	if (write(evt_fd, buf, n) < 0)
+		return;   /* no reader / buffer full: drop the event */
+}
 
 /*
  * Focus handling. The Miyoo has no touchscreen: the D-pad drives an LVGL focus
@@ -138,26 +177,37 @@ static void hal_init(void)
 	hal_init_input();
 }
 
-static void launch_handler(lv_event_t *e)
-{
-	lv_event_code_t code = lv_event_get_code(e);
-	const struct app_entry *app = lv_event_get_user_data(e);
+/* Log the launched process's output here so failures are diagnosable. */
+#define GAME_LOG "/tmp/lvshell-game.log"
 
-	if (code != LV_EVENT_PRESSED)
-		return;
+static void app_launch(const struct app_entry *app)
+{
+	const char *home;
 
 	if (cntx.child_pid) {
 		printf("Current child is still running...\n");
 		return;
 	}
 
-	music_stop();   /* hand the audio device to the game */
+	music_stop();                 /* hand the audio device to the game */
+	home = sandbox_prepare();     /* private scratch $HOME for the process */
+	if (home)
+		setenv("HOME", home, 1);
+
 	cntx.child_pid = util_start_cmd(app->argv[0], (const char * const *)app->argv,
-			app->dir[0] ? app->dir : NULL);
+			app->dir[0] ? app->dir : NULL, GAME_LOG);
+	evt_emit("launched %s", app->title);
 }
 
-/* Reap a finished game, redraw the UI (the game left the framebuffer in its
- * own state) and resume the background music. */
+static void launch_handler(lv_event_t *e)
+{
+	if (lv_event_get_code(e) != LV_EVENT_PRESSED)
+		return;
+	app_launch(lv_event_get_user_data(e));
+}
+
+/* Reap a finished game, tear down its sandbox, redraw the UI (the game left the
+ * framebuffer in its own state) and resume the background music. */
 static void game_poll(void)
 {
 	if (cntx.child_pid <= 0)
@@ -165,8 +215,10 @@ static void game_poll(void)
 	if (waitpid(cntx.child_pid, NULL, WNOHANG) != cntx.child_pid)
 		return;
 	cntx.child_pid = 0;
+	sandbox_teardown();
 	lv_obj_invalidate(lv_screen_active());   /* force a full redraw on resume */
 	music_start();
+	evt_emit("exited");
 }
 
 /* The main menu is built on its own screen so a splash can show first. */
@@ -594,6 +646,7 @@ static void splash_done_cb(lv_timer_t *t)
 	}
 	lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
 	lv_timer_delete(t);
+	evt_emit("ready");
 
 	if (dp_should_offer)
 		show_datapart_dialog();
@@ -644,12 +697,9 @@ static void ctl_init(void)
 
 static void ctl_launch(int i)
 {
-	if (i < 0 || i >= cntx.num_apps || cntx.child_pid)
+	if (i < 0 || i >= cntx.num_apps)
 		return;
-	music_stop();
-	cntx.child_pid = util_start_cmd(cntx.apps[i].argv[0],
-			(const char * const *)cntx.apps[i].argv,
-			cntx.apps[i].dir[0] ? cntx.apps[i].dir : NULL);
+	app_launch(&cntx.apps[i]);
 }
 
 static void ctl_poll(void)
@@ -773,6 +823,7 @@ int main(int argc, char **argv)
 	music_start();
 
 	ctl_init();
+	evt_init();
 	show_splash();
 
 	while (1) {
