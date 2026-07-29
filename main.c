@@ -135,6 +135,40 @@ void make_focusable(lv_obj_t *obj)
 	lv_obj_add_style(obj, &style_focus, LV_STATE_FOCUSED);
 }
 
+/* The visible text of a focusable widget: the first label somewhere beneath it
+ * (game cards and list buttons both carry their name in a child label). */
+static const char *obj_label_text(lv_obj_t *o)
+{
+	uint32_t n = lv_obj_get_child_count(o);
+
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *c = lv_obj_get_child(o, i);
+		if (lv_obj_check_type(c, &lv_label_class))
+			return lv_label_get_text(c);
+		const char *deep = obj_label_text(c);
+		if (deep)
+			return deep;
+	}
+	return NULL;
+}
+
+/* Report the highlighted item on the event FIFO so a controller/tester can see
+ * what the D-pad has landed on (echo'd as "selected <name>"). */
+static void focus_cb(lv_group_t *g)
+{
+	lv_obj_t *o = lv_group_get_focused(g);
+	const char *t = o ? obj_label_text(o) : NULL;
+	char name[96];
+	size_t i;
+
+	/* Flatten to one line: card labels can carry a "\n<count>" suffix. */
+	for (i = 0; t && t[i] && i < sizeof(name) - 1; i++)
+		name[i] = (t[i] == '\n') ? ' ' : t[i];
+	name[i] = 0;
+
+	evt_emit("selected %s", t ? name : "?");
+}
+
 /* Start a fresh focus group for a screen; widgets created afterwards join it
  * (it becomes the default group). */
 lv_group_t *screen_group_begin(lv_obj_t *scr)
@@ -142,6 +176,7 @@ lv_group_t *screen_group_begin(lv_obj_t *scr)
 	lv_group_t *g = lv_group_create();
 
 	lv_group_set_default(g);
+	lv_group_set_focus_cb(g, focus_cb);
 	if (num_screen_groups < MAX_SCREEN_GROUPS) {
 		screen_groups[num_screen_groups].scr = scr;
 		screen_groups[num_screen_groups].grp = g;
@@ -950,6 +985,19 @@ int main(int argc, char **argv)
 
 	while (1) {
 		uint32_t wait;
+
+		/* Liveness beat on the event FIFO once a second. If these stop, the
+		 * main loop is wedged (e.g. blocked in the DirectFB flush) rather
+		 * than merely idle - a reader can tell "dead" from "quiet". */
+		{
+			static uint32_t last_hb;
+			uint32_t now = lv_tick_get();
+
+			if (now - last_hb >= 1000) {
+				last_hb = now;
+				evt_emit("heartbeat %u", now);
+			}
+		}
 
 		ctl_poll();
 		game_poll();
