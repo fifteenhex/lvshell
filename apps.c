@@ -258,51 +258,72 @@ static void discover_scummvm(void)
 	pclose(fp);
 }
 
-/* Mednafen: one entry per ROM found. */
+/*
+ * Emulated systems. Each console is its own menu group; the menu shows the
+ * *system* (Megadrive, NES, ...), not the emulator. ROMs live in
+ * /data/roms/<dir>/ (or flat in /data/roms or /data, matched by extension).
+ * The emulator is picked per system - mednafen currently handles all of these,
+ * but the table makes it easy to route a system to a different emulator later.
+ */
 #define MEDNAFEN_EXE "/usr/bin/mednafen"
 
-static void mednafen_found(const char *dir, const char *name)
+static const char *const ext_nes[]  = { ".nes", ".fds", NULL };
+static const char *const ext_gen[]  = { ".md", ".gen", ".smd", ".bin", NULL };
+static const char *const ext_snes[] = { ".sfc", ".smc", NULL };
+static const char *const ext_gb[]   = { ".gb", ".gbc", NULL };
+static const char *const ext_gba[]  = { ".gba", NULL };
+static const char *const ext_sms[]  = { ".sms", NULL };
+static const char *const ext_gg[]   = { ".gg", NULL };
+static const char *const ext_pce[]  = { ".pce", NULL };
+static const char *const ext_lynx[] = { ".lnx", NULL };
+static const char *const ext_ngp[]  = { ".ngp", ".ngc", NULL };
+static const char *const ext_ws[]   = { ".ws", ".wsc", NULL };
+
+static const struct emu_system {
+	const char        *dir;    /* /data/roms/<dir> */
+	const char        *name;   /* menu group name */
+	const char        *emu;    /* emulator executable */
+	const char *const *exts;
+} systems[] = {
+	{ "nes",        "NES",              MEDNAFEN_EXE, ext_nes  },
+	{ "genesis",    "Megadrive",        MEDNAFEN_EXE, ext_gen  },
+	{ "snes",       "SNES",             MEDNAFEN_EXE, ext_snes },
+	{ "gb",         "Game Boy",         MEDNAFEN_EXE, ext_gb   },
+	{ "gba",        "Game Boy Advance", MEDNAFEN_EXE, ext_gba  },
+	{ "sms",        "Master System",    MEDNAFEN_EXE, ext_sms  },
+	{ "gamegear",   "Game Gear",        MEDNAFEN_EXE, ext_gg   },
+	{ "pcengine",   "PC Engine",        MEDNAFEN_EXE, ext_pce  },
+	{ "lynx",       "Lynx",             MEDNAFEN_EXE, ext_lynx },
+	{ "ngp",        "Neo Geo Pocket",   MEDNAFEN_EXE, ext_ngp  },
+	{ "wonderswan", "WonderSwan",       MEDNAFEN_EXE, ext_ws   },
+};
+#define NUM_SYSTEMS ((int)(sizeof(systems) / sizeof(systems[0])))
+
+static const struct emu_system *cur_sys;
+
+static void rom_found(const char *dir, const char *name)
 {
 	char path[512];
-	const char *argv[] = { MEDNAFEN_EXE, path, NULL };
+	const char *argv[] = { cur_sys->emu, path, NULL };
 
 	snprintf(path, sizeof(path), "%s/%s", dir, name);
 	apps_add(name, argv, NULL, NULL);
 }
 
-static const char *const mednafen_exts[] = {
-	".nes", ".fds", ".gb", ".gbc", ".gba", ".sfc", ".smc", ".md", ".gen",
-	".sms", ".gg", ".pce", ".lnx", ".ngp", ".ngc", ".ws", ".wsc", NULL
-};
-
-static void discover_mednafen(void)
+static void discover_systems(void)
 {
-	static const char *dirs[] = { "/data/roms", "/data", NULL };
-	const char *roms = "/data/roms";
-	DIR *dp;
-	struct dirent *e;
+	for (int i = 0; i < NUM_SYSTEMS; i++) {
+		const struct emu_system *s = &systems[i];
+		char subdir[256];
+		const char *dirs[] = { subdir, "/data/roms", "/data", NULL };
 
-	if (!path_exists(MEDNAFEN_EXE))
-		return;
-
-	cur_group = "Mednafen";
-	for_each_data_file(dirs, mednafen_exts, mednafen_found);
-
-	/* ROMs are organised in a per-system sub-directory of /data/roms; scan
-	 * each of those too. */
-	dp = opendir(roms);
-	if (!dp)
-		return;
-	while ((e = readdir(dp))) {
-		char sub[256];
-		const char *subdir[2] = { sub, NULL };
-
-		if (e->d_name[0] == '.')
+		if (!path_exists(s->emu))
 			continue;
-		snprintf(sub, sizeof(sub), "%s/%s", roms, e->d_name);
-		for_each_data_file(subdir, mednafen_exts, mednafen_found);
+		cur_sys = s;
+		cur_group = s->name;
+		snprintf(subdir, sizeof(subdir), "/data/roms/%s", s->dir);
+		for_each_data_file(dirs, s->exts, rom_found);
 	}
-	closedir(dp);
 }
 
 /**********************************************************************************************************************/
@@ -312,7 +333,7 @@ typedef void (*discover_fn)(void);
 static const discover_fn discoverers[] = {
 	discover_doom,
 	discover_scummvm,
-	discover_mednafen,
+	discover_systems,
 };
 
 int apps_discover(const struct app_entry **out)

@@ -1,5 +1,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
@@ -17,7 +19,7 @@ extern char **environ;
  * wrong before/at exec.
  */
 pid_t util_start_cmd(const char *executable, const char * const *args,
-		const char *dir)
+		const char *dir, const char *logpath)
 {
 	pid_t pid;
 
@@ -34,6 +36,18 @@ pid_t util_start_cmd(const char *executable, const char * const *args,
 		/* Child. */
 		if (dir && chdir(dir) != 0)
 			_Exit(126);   /* couldn't enter the working directory */
+
+		/* Capture the child's output so failures are diagnosable. */
+		if (logpath) {
+			int lf = open(logpath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+			if (lf >= 0) {
+				dup2(lf, 1);
+				dup2(lf, 2);
+				if (lf > 2)
+					close(lf);
+			}
+		}
 
 		/*
 		 * Don't leak lvshell's file descriptors (DirectFB/SDL, the input
