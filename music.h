@@ -19,4 +19,7 @@ void music_stop(void);
 /* Call from the main loop: reaps the player and loops the playlist. */
 void music_poll(void);
 
+/* Display name of the currently playing track, or NULL if nothing is playing. */
+const char *music_current(void);
+
 #endif /* MUSIC_H_ */

@@ -644,6 +644,81 @@ static void build_buttontest_screen(void)
 	lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
+/**********************************************************************************************************************/
+/* Now-playing ticker: the current module name slides in, pauses, slides out                                          */
+/**********************************************************************************************************************/
+
+#define TICKER_SLIDE_MS 900
+#define TICKER_PAUSE_MS 1800
+
+static lv_obj_t *nowplaying_label;
+static bool      ticker_active;
+static char      ticker_name[160];
+
+static void ticker_set_x(void *var, int32_t v)
+{
+	lv_obj_set_x((lv_obj_t *)var, v);
+}
+
+static void ticker_out_done(lv_anim_t *a)
+{
+	(void)a;
+	ticker_active = false;   /* ticker_poll() may start the next pass */
+}
+
+/* After sliding in and pausing, slide off to the left (accelerating). */
+static void ticker_in_done(lv_anim_t *a)
+{
+	int32_t w = lv_obj_get_width(nowplaying_label);
+	lv_anim_t out;
+
+	(void)a;
+	lv_anim_init(&out);
+	lv_anim_set_var(&out, nowplaying_label);
+	lv_anim_set_exec_cb(&out, ticker_set_x);
+	lv_anim_set_values(&out, (LVSHELL_HOR_RES - w) / 2, -w);
+	lv_anim_set_duration(&out, TICKER_SLIDE_MS);
+	lv_anim_set_delay(&out, TICKER_PAUSE_MS);
+	lv_anim_set_path_cb(&out, lv_anim_path_ease_in);
+	lv_anim_set_completed_cb(&out, ticker_out_done);
+	lv_anim_start(&out);
+}
+
+/* Slide the name in from the right (decelerating) to the centre. */
+static void ticker_start(const char *text)
+{
+	int32_t w;
+	lv_anim_t in;
+
+	lv_label_set_text(nowplaying_label, text);
+	lv_obj_update_layout(nowplaying_label);
+	w = lv_obj_get_width(nowplaying_label);
+
+	lv_anim_init(&in);
+	lv_anim_set_var(&in, nowplaying_label);
+	lv_anim_set_exec_cb(&in, ticker_set_x);
+	lv_anim_set_values(&in, LVSHELL_HOR_RES, (LVSHELL_HOR_RES - w) / 2);
+	lv_anim_set_duration(&in, TICKER_SLIDE_MS);
+	lv_anim_set_path_cb(&in, lv_anim_path_ease_out);
+	lv_anim_set_completed_cb(&in, ticker_in_done);
+	lv_anim_start(&in);
+}
+
+static void ticker_poll(void)
+{
+	const char *name;
+
+	if (ticker_active || !nowplaying_label)
+		return;
+	name = music_current();
+	if (!name)
+		return;
+
+	snprintf(ticker_name, sizeof(ticker_name), LV_SYMBOL_AUDIO " %s", name);
+	ticker_active = true;
+	ticker_start(ticker_name);
+}
+
 static void setup_ui(lv_obj_t *parent)
 {
 	/* The background squares fly off-screen; don't let that add a scrollbar. */
@@ -655,6 +730,14 @@ static void setup_ui(lv_obj_t *parent)
 	setup_battery(parent);
 	setup_screen_tag(parent);
 	setup_group_carousel(parent);
+
+	/* Now-playing ticker: below the menu, above the corner tag. Starts
+	 * off-screen to the right; ticker_poll() animates it while music plays. */
+	nowplaying_label = lv_label_create(parent);
+	lv_obj_set_style_text_font(nowplaying_label, &lv_font_montserrat_16, 0);
+	lv_label_set_text(nowplaying_label, "");
+	lv_obj_set_y(nowplaying_label, LVSHELL_VER_RES - 68);
+	lv_obj_set_x(nowplaying_label, LVSHELL_HOR_RES);
 
 	/* Settings button, top-left. */
 	lv_obj_t *sbtn = lv_button_create(parent);
@@ -939,6 +1022,7 @@ int main(int argc, char **argv)
 		bt_poll();
 		game_poll();
 		music_poll();
+		ticker_poll();
 		lv_timer_handler();
 		usleep(5 * 1000);
 	}
