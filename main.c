@@ -474,6 +474,7 @@ static const char *group_icon(const char *name)
 		{ "Doom",             "doom"    },
 		{ "ScummVM",          "scummvm" },
 		{ "PICO-8",           "pico"    },
+		{ "Atari ST",         "atarist" },
 		{ NULL, NULL },
 	};
 	static char path[80];
