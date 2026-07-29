@@ -61,15 +61,66 @@ static void dbg_init(void) { }
 static void dbg_init_lvgl(void) { }
 #endif
 
-static void hal_init_input(void)
+/*
+ * Focus handling. The Miyoo has no touchscreen: the D-pad drives an LVGL focus
+ * group. Each screen gets its own group so the D-pad only cycles the widgets on
+ * the visible screen, and a bold highlight makes the current selection obvious.
+ */
+#define MAX_SCREEN_GROUPS 24
+
+static lv_indev_t *kb_indev;
+static lv_group_t *cur_group;
+static lv_style_t  style_focus;
+
+static struct {
+	lv_obj_t   *scr;
+	lv_group_t *grp;
+} screen_groups[MAX_SCREEN_GROUPS];
+static int num_screen_groups;
+
+static void focus_style_init(void)
+{
+	lv_style_init(&style_focus);
+	lv_style_set_outline_width(&style_focus, 4);
+	lv_style_set_outline_pad(&style_focus, 2);
+	lv_style_set_outline_color(&style_focus, lv_palette_main(LV_PALETTE_AMBER));
+	lv_style_set_outline_opa(&style_focus, LV_OPA_COVER);
+	lv_style_set_bg_color(&style_focus, lv_palette_lighten(LV_PALETTE_BLUE, 2));
+}
+
+/* Highlight 'obj' when it holds focus. */
+static void make_focusable(lv_obj_t *obj)
+{
+	lv_obj_add_style(obj, &style_focus, LV_STATE_FOCUSED);
+}
+
+/* Start a fresh focus group for a screen; widgets created afterwards join it
+ * (it becomes the default group). */
+static lv_group_t *screen_group_begin(lv_obj_t *scr)
 {
 	lv_group_t *g = lv_group_create();
+
 	lv_group_set_default(g);
+	if (num_screen_groups < MAX_SCREEN_GROUPS) {
+		screen_groups[num_screen_groups].scr = scr;
+		screen_groups[num_screen_groups].grp = g;
+		num_screen_groups++;
+	}
+	return g;
+}
 
-	/* Keyboard drives the focus group; mouse allows direct clicks. */
-	lv_indev_t *kb_indev = lv_sdl_keyboard_create();
-	lv_indev_set_group(kb_indev, g);
+static lv_group_t *group_for_screen(lv_obj_t *scr)
+{
+	for (int i = 0; i < num_screen_groups; i++)
+		if (screen_groups[i].scr == scr)
+			return screen_groups[i].grp;
+	return NULL;
+}
 
+static void hal_init_input(void)
+{
+	/* Keyboard/D-pad drives the focus group; mouse allows direct clicks. */
+	kb_indev = lv_sdl_keyboard_create();
 	lv_sdl_mouse_create();
 }
 
@@ -231,6 +282,15 @@ static lv_obj_t *about_screen;
 
 static void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 {
+	lv_group_t *g = group_for_screen(scr);
+
+	if (g) {
+		cur_group = g;
+		lv_indev_set_group(kb_indev, g);
+		/* Make sure something on the new screen is highlighted. */
+		if (!lv_group_get_focused(g))
+			lv_group_focus_next(g);
+	}
 	lv_screen_load_anim(scr, anim, 250, 0, false);
 }
 
@@ -243,6 +303,7 @@ static void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
 {
 	lv_obj_t *btn = lv_button_create(scr);
 	lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 5, 5);
+	make_focusable(btn);
 	lv_obj_add_event_cb(btn, back_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *bl = lv_label_create(btn);
 	lv_label_set_text(bl, LV_SYMBOL_LEFT " Back");
@@ -313,6 +374,7 @@ static void add_game_card(lv_obj_t *panel, const struct app_entry *app)
 	lv_obj_t *btn = lv_button_create(panel);
 
 	lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
+	make_focusable(btn);
 	lv_obj_add_event_cb(btn, launch_handler, LV_EVENT_ALL, (void *)app);
 	card_add_icon(btn, app->icon);
 	card_add_label(btn, app->title);
@@ -331,6 +393,7 @@ static void add_group_card(lv_obj_t *panel, struct app_group *grp)
 	char sub[64];
 
 	lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
+	make_focusable(btn);
 	lv_obj_add_event_cb(btn, group_open_cb, LV_EVENT_CLICKED, grp->screen);
 
 	/* Represent the group with its first member's cover, if any. */
@@ -374,6 +437,7 @@ static void build_group_screens(void)
 
 		lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 		lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+		screen_group_begin(scr);
 		setup_background(scr);
 		make_header(scr, groups[i].name, nav_main);
 
@@ -389,15 +453,17 @@ static void build_group_screens(void)
 static void build_settings_screen(void)
 {
 	settings_screen = lv_obj_create(NULL);
+	screen_group_begin(settings_screen);
 	make_header(settings_screen, "Settings", nav_main);
 
 	lv_obj_t *list = lv_list_create(settings_screen);
 	lv_obj_set_size(list, lv_pct(96), lv_pct(78));
 	lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -6);
 
-	lv_list_add_button(list, LV_SYMBOL_IMAGE, "Display");   /* placeholder */
-	lv_list_add_button(list, LV_SYMBOL_AUDIO, "Audio");     /* placeholder */
+	make_focusable(lv_list_add_button(list, LV_SYMBOL_IMAGE, "Display")); /* placeholder */
+	make_focusable(lv_list_add_button(list, LV_SYMBOL_AUDIO, "Audio"));   /* placeholder */
 	lv_obj_t *about = lv_list_add_button(list, LV_SYMBOL_LIST, "About");
+	make_focusable(about);
 	lv_obj_add_event_cb(about, nav_about, LV_EVENT_CLICKED, NULL);
 }
 
@@ -412,6 +478,7 @@ static void build_about_screen(void)
 			LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR, LVGL_VERSION_PATCH);
 
 	about_screen = lv_obj_create(NULL);
+	screen_group_begin(about_screen);
 	make_header(about_screen, "About", nav_back_settings);
 
 	lv_obj_t *cont = lv_obj_create(about_screen);
@@ -431,6 +498,7 @@ static void setup_ui(lv_obj_t *parent)
 	lv_obj_remove_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
 
+	screen_group_begin(parent);
 	setup_background(parent);
 	setup_battery(parent);
 	setup_screen_tag(parent);
@@ -439,6 +507,7 @@ static void setup_ui(lv_obj_t *parent)
 	/* Settings button, top-left. */
 	lv_obj_t *sbtn = lv_button_create(parent);
 	lv_obj_align(sbtn, LV_ALIGN_TOP_LEFT, 5, 5);
+	make_focusable(sbtn);
 	lv_obj_add_event_cb(sbtn, nav_settings, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *sl = lv_label_create(sbtn);
 	lv_label_set_text(sl, LV_SYMBOL_SETTINGS);
@@ -545,6 +614,14 @@ static void dp_poll(void)
 
 static void splash_done_cb(lv_timer_t *t)
 {
+	lv_group_t *g = group_for_screen(main_screen);
+
+	if (g) {
+		cur_group = g;
+		lv_indev_set_group(kb_indev, g);
+		if (!lv_group_get_focused(g))
+			lv_group_focus_next(g);
+	}
 	lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
 	lv_timer_delete(t);
 
@@ -640,6 +717,16 @@ static void ctl_poll(void)
 		if (g >= 0 && g < num_groups && groups[g].screen)
 			nav_to(groups[g].screen, LV_SCR_LOAD_ANIM_MOVE_LEFT);
 	}
+	else if (!strcmp(cmd, "focus")) {
+		/* Advance the highlight, as the D-pad would. */
+		char *arg = strtok_r(NULL, " \t\r\n", &save);
+		if (cur_group) {
+			if (arg && !strcmp(arg, "prev"))
+				lv_group_focus_prev(cur_group);
+			else
+				lv_group_focus_next(cur_group);
+		}
+	}
 	else if (!strcmp(cmd, "launch")) {
 		char *arg = strtok_r(NULL, " \t\r\n", &save);
 		ctl_launch(arg ? atoi(arg) : 0);
@@ -659,6 +746,7 @@ int main(int argc, char **argv)
 	lv_init();
 	dbg_init_lvgl();
 	hal_init();
+	focus_style_init();
 
 	/* Offer to create the data partition on first boot if there's room. */
 	{
