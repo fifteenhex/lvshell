@@ -26,6 +26,7 @@
 #include "background.h"
 #include "ticker.h"
 #include "buttontest.h"
+#include "performance.h"
 #include "sandbox.h"
 
 struct context {
@@ -291,6 +292,7 @@ static void setup_screen_tag(lv_obj_t *parent)
 lv_obj_t *settings_screen;
 lv_obj_t *about_screen;
 lv_obj_t *buttontest_screen;
+lv_obj_t *performance_screen;
 
 void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 {
@@ -311,6 +313,7 @@ void nav_settings(lv_event_t *e)      { (void)e; nav_to(settings_screen, LV_SCR_
 void nav_about(lv_event_t *e)         { (void)e; nav_to(about_screen,    LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 void nav_back_settings(lv_event_t *e) { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
 void nav_buttontest(lv_event_t *e)    { (void)e; nav_to(buttontest_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
+void nav_performance(lv_event_t *e)   { (void)e; nav_to(performance_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 
 void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
 {
@@ -482,6 +485,10 @@ static void build_settings_screen(void)
 	lv_obj_t *btntest = lv_list_add_button(list, LV_SYMBOL_KEYBOARD, "Button Test");
 	make_focusable(btntest);
 	lv_obj_add_event_cb(btntest, nav_buttontest, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *perf = lv_list_add_button(list, LV_SYMBOL_CHARGE, "Performance");
+	make_focusable(perf);
+	lv_obj_add_event_cb(perf, nav_performance, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *about = lv_list_add_button(list, LV_SYMBOL_LIST, "About");
 	make_focusable(about);
@@ -817,6 +824,7 @@ int main(int argc, char **argv)
 	build_settings_screen();
 	build_about_screen();
 	buttontest_build();
+	performance_build();
 
 	/* Start background chiptune music, if any modules are present. */
 	music_init();
@@ -845,6 +853,7 @@ int main(int argc, char **argv)
 
 		dp_poll();
 		buttontest_poll();
+		performance_poll();
 		music_poll();
 		ticker_poll();
 
