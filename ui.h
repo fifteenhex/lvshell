@@ -25,6 +25,7 @@ extern lv_obj_t *main_screen;
 extern lv_obj_t *settings_screen;
 extern lv_obj_t *about_screen;
 extern lv_obj_t *buttontest_screen;
+extern lv_obj_t *performance_screen;
 
 void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim);
 void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb);
@@ -34,5 +35,6 @@ void nav_settings(lv_event_t *e);
 void nav_about(lv_event_t *e);
 void nav_back_settings(lv_event_t *e);
 void nav_buttontest(lv_event_t *e);
+void nav_performance(lv_event_t *e);
 
 #endif /* UI_H_ */

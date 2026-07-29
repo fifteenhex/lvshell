@@ -266,6 +266,7 @@ static void discover_scummvm(void)
  * but the table makes it easy to route a system to a different emulator later.
  */
 #define MEDNAFEN_EXE "/usr/bin/mednafen"
+#define MGBA_EXE     "/usr/bin/mgba"
 
 static const char *const ext_nes[]  = { ".nes", ".fds", NULL };
 static const char *const ext_gen[]  = { ".md", ".gen", ".smd", ".bin", NULL };
@@ -288,8 +289,8 @@ static const struct emu_system {
 	{ "nes",        "NES",              MEDNAFEN_EXE, ext_nes  },
 	{ "genesis",    "Megadrive",        MEDNAFEN_EXE, ext_gen  },
 	{ "snes",       "SNES",             MEDNAFEN_EXE, ext_snes },
-	{ "gb",         "Game Boy",         MEDNAFEN_EXE, ext_gb   },
-	{ "gba",        "Game Boy Advance", MEDNAFEN_EXE, ext_gba  },
+	{ "gb",         "Game Boy",         MGBA_EXE,     ext_gb   },
+	{ "gba",        "Game Boy Advance", MGBA_EXE,     ext_gba  },
 	{ "sms",        "Master System",    MEDNAFEN_EXE, ext_sms  },
 	{ "gamegear",   "Game Gear",        MEDNAFEN_EXE, ext_gg   },
 	{ "pcengine",   "PC Engine",        MEDNAFEN_EXE, ext_pce  },
