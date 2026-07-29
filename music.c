@@ -86,7 +86,7 @@ void music_start(void)
 	argv[2] = NULL;
 
 	music_start_tick = lv_tick_get();
-	music_pid = util_start_cmd(argv[0], (const char * const *)argv, NULL);
+	music_pid = util_start_cmd(argv[0], (const char * const *)argv, NULL, NULL);
 	DBG("music: playing [%d/%d] %s pid %d\n", music_index + 1, music_count,
 		music_files[music_index], (int)music_pid);
 }
