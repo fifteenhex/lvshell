@@ -388,6 +388,31 @@ static void discover_pico8(void)
 	for_each_data_file(dirs, exts, pico8_found);
 }
 
+/* hatari: Atari ST floppy images, booted with the bundled EmuTOS ROM. */
+#define HATARI_EXE "/usr/bin/hatari"
+#define HATARI_TOS "/usr/share/hatari/tos.img"
+
+static void atarist_found(const char *dir, const char *name)
+{
+	char path[512];
+	const char *argv[] = { HATARI_EXE, "--tos", HATARI_TOS, path, NULL };
+
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	apps_add(name, argv, NULL, NULL);
+}
+
+static void discover_atarist(void)
+{
+	static const char *dirs[] = { "/data/atarist", "/data/roms/atarist", NULL };
+	static const char *exts[] = { ".st", ".stx", ".msa", ".dim", ".ipf", NULL };
+
+	if (!path_exists(HATARI_EXE))
+		return;
+
+	cur_group = "Atari ST";
+	for_each_data_file(dirs, exts, atarist_found);
+}
+
 /**********************************************************************************************************************/
 
 typedef void (*discover_fn)(void);
@@ -397,6 +422,7 @@ static const discover_fn discoverers[] = {
 	discover_scummvm,
 	discover_systems,
 	discover_pico8,
+	discover_atarist,
 };
 
 int apps_discover(const struct app_entry **out)

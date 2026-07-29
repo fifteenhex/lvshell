@@ -408,14 +408,31 @@ static void card_add_icon(lv_obj_t *btn, const char *icon)
 	lv_obj_align(img, LV_ALIGN_CENTER, 0, -12);
 }
 
+/* A wrapped, bottom-aligned title label in the given colour, offset by (dx,dy).
+ * A dark copy behind the white text forms a drop shadow. */
+static lv_obj_t *card_title_label(lv_obj_t *btn, const char *text,
+				  lv_color_t color, lv_opa_t opa, int dx, int dy)
+{
+	lv_obj_t *l = lv_label_create(btn);
+
+	lv_label_set_text(l, text);
+	lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(l, lv_pct(90));
+	lv_obj_set_style_text_color(l, color, 0);
+	lv_obj_set_style_text_opa(l, opa, 0);
+	lv_obj_align(l, LV_ALIGN_BOTTOM_MID, dx, -10 + dy);
+	return l;
+}
+
 static void card_add_label(lv_obj_t *btn, const char *text)
 {
-	lv_obj_t *label = lv_label_create(btn);
-
-	lv_label_set_text(label, text);
-	lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-	lv_obj_set_width(label, lv_pct(90));
-	lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
+	/* A dark 1px outline (four offset copies) behind the white title keeps it
+	 * readable over bright card art or icons. */
+	card_title_label(btn, text, lv_color_black(), LV_OPA_COVER,  1,  1);
+	card_title_label(btn, text, lv_color_black(), LV_OPA_COVER, -1,  1);
+	card_title_label(btn, text, lv_color_black(), LV_OPA_COVER,  1, -1);
+	card_title_label(btn, text, lv_color_black(), LV_OPA_COVER, -1, -1);
+	card_title_label(btn, text, lv_color_white(), LV_OPA_COVER,  0,  0);
 }
 
 /* One launchable game. */
@@ -457,6 +474,7 @@ static const char *group_icon(const char *name)
 		{ "Doom",             "doom"    },
 		{ "ScummVM",          "scummvm" },
 		{ "PICO-8",           "pico"    },
+		{ "Atari ST",         "atarist" },
 		{ NULL, NULL },
 	};
 	static char path[80];
@@ -845,20 +863,27 @@ static void ctl_poll(void)
  * effectively the animation/refresh cadence) or a bit sooner, but wake up
  * immediately if input arrives on the control FIFO or an input device. This
  * keeps the UI responsive while not busy-spinning like a fixed usleep.
+ *
+ * With 'watch_input' false (while a game owns the display) the input devices
+ * are NOT polled: nobody drains them then, so their queued events would keep
+ * poll() returning instantly and spin the CPU. Only the control FIFO is watched
+ * so remote commands (e.g. "kill") still wake us.
  */
 #define LOOP_MAX_FDS 20
 
-static void loop_wait(uint32_t timeout_ms)
+static void loop_wait(uint32_t timeout_ms, bool watch_input)
 {
 	struct pollfd fds[LOOP_MAX_FDS];
 	int devfds[LOOP_MAX_FDS - 1];
 	int n = 0, ndev, i;
 
-	ndev = input_get_fds(devfds, LOOP_MAX_FDS - 1);
-	for (i = 0; i < ndev; i++) {
-		fds[n].fd = devfds[i];
-		fds[n].events = POLLIN;
-		n++;
+	if (watch_input) {
+		ndev = input_get_fds(devfds, LOOP_MAX_FDS - 1);
+		for (i = 0; i < ndev; i++) {
+			fds[n].fd = devfds[i];
+			fds[n].events = POLLIN;
+			n++;
+		}
 	}
 	if (ctl_fd >= 0) {
 		fds[n].fd = ctl_fd;
@@ -928,7 +953,7 @@ int main(int argc, char **argv)
 		if (cntx.child_pid > 0) {
 			/* Keep sampling performance so the graph records the game. */
 			performance_poll(true);
-			loop_wait(100);
+			loop_wait(100, false);   /* don't spin on undrained input */
 			continue;
 		}
 
@@ -944,7 +969,7 @@ int main(int argc, char **argv)
 		wait = lv_timer_handler();
 		if (wait > 30)
 			wait = 30;
-		loop_wait(wait);
+		loop_wait(wait, true);
 	}
 
 	return 0;
