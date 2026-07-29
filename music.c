@@ -31,6 +31,7 @@ static const char *music_dirs[] = {
 static pid_t    music_pid;
 static char    *music_files[MUSIC_MAX];
 static int      music_count;
+static int      music_index;      /* currently playing track */
 static bool     music_disabled;   /* no player / no audio device */
 static uint32_t music_start_tick;
 
@@ -70,8 +71,7 @@ void music_init(void)
 
 void music_start(void)
 {
-	const char *argv[MUSIC_MAX + 2];
-	int n = 0;
+	const char *argv[3];
 
 	if (music_disabled || music_pid || music_count == 0)
 		return;
@@ -80,14 +80,15 @@ void music_start(void)
 		return;
 	}
 
-	argv[n++] = XMP_EXE;
-	for (int i = 0; i < music_count; i++)
-		argv[n++] = music_files[i];
-	argv[n] = NULL;
+	/* Play one track at a time so we know which one is playing (for the UI). */
+	argv[0] = XMP_EXE;
+	argv[1] = music_files[music_index];
+	argv[2] = NULL;
 
 	music_start_tick = lv_tick_get();
 	music_pid = util_start_cmd(argv[0], (const char * const *)argv, NULL);
-	DBG("music: started xmp (%d tracks) pid %d\n", music_count, (int)music_pid);
+	DBG("music: playing [%d/%d] %s pid %d\n", music_index + 1, music_count,
+		music_files[music_index], (int)music_pid);
 }
 
 void music_stop(void)
@@ -107,12 +108,35 @@ void music_poll(void)
 		return;
 
 	music_pid = 0;
-	/* If xmp died almost immediately there is no working audio device (e.g.
-	 * under QEMU); stop retrying rather than spin. */
-	if (lv_tick_get() - music_start_tick < 2000) {
+	/* If xmp died almost immediately there is no working audio device; stop
+	 * retrying rather than spin. Real modules play for far longer than this. */
+	if (lv_tick_get() - music_start_tick < 1000) {
 		music_disabled = true;
 		DBG("music: xmp exited immediately, disabling background music\n");
 		return;
 	}
-	music_start();   /* playlist finished: loop it */
+	/* Track finished: advance to the next one (looping the playlist). */
+	music_index = (music_index + 1) % music_count;
+	music_start();
+}
+
+/* Display name (file base name, no extension) of the current track, or NULL. */
+const char *music_current(void)
+{
+	static char name[128];
+	const char *base, *dot;
+	size_t len;
+
+	if (music_pid <= 0 || music_count == 0)
+		return NULL;
+
+	base = strrchr(music_files[music_index], '/');
+	base = base ? base + 1 : music_files[music_index];
+	dot = strrchr(base, '.');
+	len = dot ? (size_t)(dot - base) : strlen(base);
+	if (len >= sizeof(name))
+		len = sizeof(name) - 1;
+	memcpy(name, base, len);
+	name[len] = 0;
+	return name;
 }
