@@ -473,6 +473,9 @@ static void ctl_init(void)
 	unlink(CTL_PATH);
 	if (mkfifo(CTL_PATH, 0666) != 0)
 		return;
+	/* mkfifo's mode is masked by umask; force it writable so a non-root shell
+	 * can drive the UI (lvshell runs as root from the init script). */
+	chmod(CTL_PATH, 0666);
 	/* O_RDWR keeps a writer around so reads return EAGAIN (not EOF) when idle. */
 	ctl_fd = open(CTL_PATH, O_RDWR | O_NONBLOCK);
 }
