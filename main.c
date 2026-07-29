@@ -10,35 +10,16 @@
 #include "lvgl/src/drivers/sdl/lv_sdl_mouse.h"
 #include "lvgl/src/drivers/sdl/lv_sdl_keyboard.h"
 
+#include "apps.h"
 #include "util.h"
 
 #define LVSHELL_HOR_RES 640
 #define LVSHELL_VER_RES 480
 
-enum toplevel_type {
-	TOPLEVELT_RUNCMD,
-	TOPLEVELT_SETTINGS,
-	TOPLEVELT_ABOUT,
-};
-
-struct toplevel_data_runcmd {
-	const char* executable;
-	const char * const *args;
-	const char *dir;
-};
-
-struct toplevel {
-	enum toplevel_type type;
-	const char *title;
-	union {
-		struct toplevel_data_runcmd runcmd;
-	};
-};
-
 struct context {
-	struct toplevel *toplevel;
-	unsigned num_toplevel;
-	pid_t child_pid;
+	const struct app_entry *apps;
+	int                     num_apps;
+	pid_t                   child_pid;
 };
 
 static struct context cntx;
@@ -69,26 +50,21 @@ static void hal_init(void)
 	hal_init_input();
 }
 
-static void top_handler(lv_event_t *e)
+static void launch_handler(lv_event_t *e)
 {
 	lv_event_code_t code = lv_event_get_code(e);
-	struct toplevel *tl = lv_event_get_user_data(e);
+	const struct app_entry *app = lv_event_get_user_data(e);
 
-	if (code == LV_EVENT_PRESSED) {
-		switch (tl->type) {
-		case TOPLEVELT_RUNCMD:
-			if (cntx.child_pid)
-				printf("Current child is still running...\n");
-			else
-				cntx.child_pid = util_start_cmd(tl->runcmd.executable,
-						tl->runcmd.args,
-						tl->runcmd.dir);
-			break;
-		default:
-			printf("Unhandled press event for %s\n", tl->title);
-			break;
-		}
+	if (code != LV_EVENT_PRESSED)
+		return;
+
+	if (cntx.child_pid) {
+		printf("Current child is still running...\n");
+		return;
 	}
+
+	cntx.child_pid = util_start_cmd(app->argv[0], (const char * const *)app->argv,
+			app->dir[0] ? app->dir : NULL);
 }
 
 static void setup_battery(void)
@@ -103,17 +79,30 @@ static void setup_carousell(void)
 {
 	lv_obj_t *panel = lv_obj_create(lv_screen_active());
 	lv_obj_set_size(panel, lv_pct(100), lv_pct(60));
-	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
-	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
 	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 
-	for (unsigned i = 0; i < cntx.num_toplevel; i++) {
+	if (cntx.num_apps == 0) {
+		/* Nothing runnable was found - say so rather than show a blank strip. */
+		lv_obj_t *label = lv_label_create(panel);
+		lv_label_set_text(label,
+				"No games found.\n"
+				"Add WADs or ROMs under /data and restart.");
+		lv_obj_center(label);
+		return;
+	}
+
+	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
+	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
+
+	for (int i = 0; i < cntx.num_apps; i++) {
 		lv_obj_t *btn = lv_button_create(panel);
 		lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
-		lv_obj_add_event_cb(btn, top_handler, LV_EVENT_ALL,
-				&cntx.toplevel[i]);
+		lv_obj_add_event_cb(btn, launch_handler, LV_EVENT_ALL,
+				(void *)&cntx.apps[i]);
 		lv_obj_t *label = lv_label_create(btn);
-		lv_label_set_text(label, cntx.toplevel[i].title);
+		lv_label_set_text(label, cntx.apps[i].title);
+		lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+		lv_obj_set_width(label, lv_pct(90));
 		lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
 	}
 
@@ -137,44 +126,12 @@ static void setup_ui(void)
 	setup_carousell();
 }
 
-static const char *chocodoom_args[] = { "chocolate-doom", "-iwad", "/data/chocodoom/doom2/DOOM2.WAD", NULL };
-static const char *cppquake_args[] = { "sdlquake", NULL };
-
 int main(int argc, char **argv)
 {
 	lv_init();
 	hal_init();
 
-	struct toplevel tops[] = {
-		{
-			.type = TOPLEVELT_RUNCMD,
-			.title = "Chocolate Doom - Doom2",
-			.runcmd = {
-				.executable = "/usr/bin/chocolate-doom",
-				.args = chocodoom_args,
-			},
-		},
-		{
-			.type = TOPLEVELT_RUNCMD,
-			.title = "cppquake - Quake",
-			.runcmd = {
-				.executable = "/usr/bin/sdlquake",
-				.args = cppquake_args,
-				.dir = "/data/quake/"
-			},
-		},
-		{
-			.type = TOPLEVELT_SETTINGS,
-			.title = "Settings"
-		},
-		{
-			.type = TOPLEVELT_ABOUT,
-			.title = "About",
-		},
-	};
-
-	cntx.toplevel = tops;
-	cntx.num_toplevel = sizeof(tops) / sizeof(tops[0]);
+	cntx.num_apps = apps_discover(&cntx.apps);
 
 	setup_ui();
 
