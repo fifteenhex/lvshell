@@ -225,6 +225,52 @@ static void setup_background(lv_obj_t *parent)
 	}
 }
 
+/* Delete a square once it has flown off the screen. */
+static void color_square_done(lv_anim_t *a)
+{
+	lv_obj_delete((lv_obj_t *)a->var);
+}
+
+/* Fling a single fast, randomly-coloured square across the background, then
+ * reschedule for a random moment at least a second away (one at a time). */
+static void spawn_color_squares(lv_timer_t *t)
+{
+	lv_obj_t *parent = lv_timer_get_user_data(t);
+	int sz = 12 + rand() % 26;
+	lv_obj_t *sq = lv_obj_create(parent);
+	lv_color_t col = lv_color_make(rand() & 0xff, rand() & 0xff, rand() & 0xff);
+	lv_anim_t ax, ar;
+
+	lv_obj_remove_flag(sq, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_size(sq, sz, sz);
+	lv_obj_set_style_radius(sq, 2, 0);
+	lv_obj_set_style_border_width(sq, 0, 0);
+	lv_obj_set_style_bg_color(sq, col, 0);
+	lv_obj_set_style_bg_opa(sq, LV_OPA_70, 0);
+	lv_obj_set_style_transform_pivot_x(sq, sz / 2, 0);
+	lv_obj_set_style_transform_pivot_y(sq, sz / 2, 0);
+	lv_obj_set_y(sq, rand() % LVSHELL_VER_RES);
+	lv_obj_move_background(sq);
+
+	lv_anim_init(&ax);
+	lv_anim_set_var(&ax, sq);
+	lv_anim_set_exec_cb(&ax, bg_anim_x);
+	lv_anim_set_values(&ax, -sz, LVSHELL_HOR_RES + sz);
+	lv_anim_set_duration(&ax, 800 + rand() % 500);   /* fast */
+	lv_anim_set_completed_cb(&ax, color_square_done);
+	lv_anim_start(&ax);
+
+	lv_anim_init(&ar);
+	lv_anim_set_var(&ar, sq);
+	lv_anim_set_exec_cb(&ar, bg_anim_rot);
+	lv_anim_set_values(&ar, 0, 3600);
+	lv_anim_set_duration(&ar, 600 + rand() % 600);
+	lv_anim_set_repeat_count(&ar, LV_ANIM_REPEAT_INFINITE);
+	lv_anim_start(&ar);
+
+	lv_timer_set_period(t, 1000 + rand() % 2500);
+}
+
 static void setup_battery(lv_obj_t *parent)
 {
 	lv_obj_t *batbar = lv_bar_create(parent);
@@ -653,31 +699,82 @@ static void build_buttontest_screen(void)
 
 #define TICKER_SLIDE_MS 900
 #define TICKER_PAUSE_MS 1800
+#define TICKER_MAXCHARS 48
+#define JIGGLE_AMP      5
 
-static lv_obj_t *nowplaying_label;
+static lv_obj_t *ticker_cont;                     /* one label per glyph */
+static lv_obj_t *ticker_chars[TICKER_MAXCHARS];
+static int       ticker_nchars;
 static bool      ticker_active;
-static char      ticker_name[160];
 
-static void ticker_set_x(void *var, int32_t v)
+static void ticker_set_x(void *var, int32_t v) { lv_obj_set_x((lv_obj_t *)var, v); }
+static void jiggle_cb(void *var, int32_t v)    { lv_obj_set_y((lv_obj_t *)var, v); }
+
+/* Wobble each letter on the Y axis, phase-shifted, while the ticker moves. */
+static void jiggle_start(uint32_t delay)
 {
-	lv_obj_set_x((lv_obj_t *)var, v);
+	for (int i = 0; i < ticker_nchars; i++) {
+		lv_anim_t a;
+
+		lv_anim_init(&a);
+		lv_anim_set_var(&a, ticker_chars[i]);
+		lv_anim_set_exec_cb(&a, jiggle_cb);
+		lv_anim_set_values(&a, 0, 2 * JIGGLE_AMP);
+		lv_anim_set_duration(&a, 160);
+		lv_anim_set_playback_duration(&a, 160);
+		lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+		lv_anim_set_delay(&a, delay + i * 25);   /* phase offset per letter */
+		lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+		lv_anim_start(&a);
+	}
+}
+
+static void jiggle_stop(void)
+{
+	for (int i = 0; i < ticker_nchars; i++) {
+		lv_anim_delete(ticker_chars[i], jiggle_cb);
+		lv_obj_set_y(ticker_chars[i], JIGGLE_AMP);   /* rest at the mid line */
+	}
+}
+
+/* Build one label per character; return the total width. */
+static int32_t ticker_build(const char *text)
+{
+	int32_t x = 0;
+
+	lv_obj_clean(ticker_cont);
+	ticker_nchars = 0;
+	for (const char *p = text; *p && ticker_nchars < TICKER_MAXCHARS; p++) {
+		lv_obj_t *c = lv_label_create(ticker_cont);
+		char ch[2] = { *p, 0 };
+
+		lv_obj_set_style_text_font(c, &lv_font_montserrat_16, 0);
+		lv_label_set_text(c, ch);
+		lv_obj_update_layout(c);
+		lv_obj_set_pos(c, x, JIGGLE_AMP);
+		x += lv_obj_get_width(c) + (*p == ' ' ? 3 : 0);
+		ticker_chars[ticker_nchars++] = c;
+	}
+	return x;
 }
 
 static void ticker_out_done(lv_anim_t *a)
 {
 	(void)a;
+	jiggle_stop();
 	ticker_active = false;   /* ticker_poll() may start the next pass */
 }
 
-/* After sliding in and pausing, slide off to the left (accelerating). */
+/* Reached the centre: pause (calm), then slide off to the left, jiggling. */
 static void ticker_in_done(lv_anim_t *a)
 {
-	int32_t w = lv_obj_get_width(nowplaying_label);
+	int32_t w = lv_obj_get_width(ticker_cont);
 	lv_anim_t out;
 
 	(void)a;
+	jiggle_stop();
 	lv_anim_init(&out);
-	lv_anim_set_var(&out, nowplaying_label);
+	lv_anim_set_var(&out, ticker_cont);
 	lv_anim_set_exec_cb(&out, ticker_set_x);
 	lv_anim_set_values(&out, (LVSHELL_HOR_RES - w) / 2, -w);
 	lv_anim_set_duration(&out, TICKER_SLIDE_MS);
@@ -685,41 +782,39 @@ static void ticker_in_done(lv_anim_t *a)
 	lv_anim_set_path_cb(&out, lv_anim_path_ease_in);
 	lv_anim_set_completed_cb(&out, ticker_out_done);
 	lv_anim_start(&out);
+	jiggle_start(TICKER_PAUSE_MS);   /* jiggle again once it starts moving out */
 }
 
-/* Slide the name in from the right (decelerating) to the centre. */
+/* Slide the name in from the right (decelerating) to the centre, jiggling. */
 static void ticker_start(const char *text)
 {
-	int32_t w;
+	int32_t w = ticker_build(text);
 	lv_anim_t in;
 
-	lv_label_set_text(nowplaying_label, text);
-	lv_obj_update_layout(nowplaying_label);
-	w = lv_obj_get_width(nowplaying_label);
-
+	lv_obj_set_width(ticker_cont, w);
 	lv_anim_init(&in);
-	lv_anim_set_var(&in, nowplaying_label);
+	lv_anim_set_var(&in, ticker_cont);
 	lv_anim_set_exec_cb(&in, ticker_set_x);
 	lv_anim_set_values(&in, LVSHELL_HOR_RES, (LVSHELL_HOR_RES - w) / 2);
 	lv_anim_set_duration(&in, TICKER_SLIDE_MS);
 	lv_anim_set_path_cb(&in, lv_anim_path_ease_out);
 	lv_anim_set_completed_cb(&in, ticker_in_done);
 	lv_anim_start(&in);
+	jiggle_start(0);
 }
 
 static void ticker_poll(void)
 {
 	const char *name;
 
-	if (ticker_active || !nowplaying_label)
+	if (ticker_active || !ticker_cont)
 		return;
 	name = music_current();
 	if (!name)
 		return;
 
-	snprintf(ticker_name, sizeof(ticker_name), LV_SYMBOL_AUDIO " %s", name);
 	ticker_active = true;
-	ticker_start(ticker_name);
+	ticker_start(name);
 }
 
 static void setup_ui(lv_obj_t *parent)
@@ -734,13 +829,18 @@ static void setup_ui(lv_obj_t *parent)
 	setup_screen_tag(parent);
 	setup_group_carousel(parent);
 
-	/* Now-playing ticker: below the menu, above the corner tag. Starts
-	 * off-screen to the right; ticker_poll() animates it while music plays. */
-	nowplaying_label = lv_label_create(parent);
-	lv_obj_set_style_text_font(nowplaying_label, &lv_font_montserrat_16, 0);
-	lv_label_set_text(nowplaying_label, "");
-	lv_obj_set_y(nowplaying_label, LVSHELL_VER_RES - 68);
-	lv_obj_set_x(nowplaying_label, LVSHELL_HOR_RES);
+	/* Now-playing ticker: a transparent strip below the menu, above the corner
+	 * tag, holding one label per letter. Starts off-screen to the right;
+	 * ticker_poll() animates it while music plays. */
+	ticker_cont = lv_obj_create(parent);
+	lv_obj_remove_style_all(ticker_cont);
+	lv_obj_remove_flag(ticker_cont, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_size(ticker_cont, 10, 16 + 2 * JIGGLE_AMP);
+	lv_obj_set_y(ticker_cont, LVSHELL_VER_RES - 74);
+	lv_obj_set_x(ticker_cont, LVSHELL_HOR_RES);
+
+	/* Occasional bursts of fast, random-coloured squares over the background. */
+	lv_timer_create(spawn_color_squares, 3000, parent);
 
 	/* Settings button, top-left. */
 	lv_obj_t *sbtn = lv_button_create(parent);
@@ -992,6 +1092,7 @@ int main(int argc, char **argv)
 	dbg_init_lvgl();
 	hal_init();
 	focus_style_init();
+	srand(getpid() ^ lv_tick_get());
 
 	/* Offer to create the data partition on first boot if there's room. */
 	{
