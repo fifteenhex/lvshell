@@ -581,19 +581,22 @@ static const struct bt_btn {
 	int         code;
 	const char *label;
 } bt_buttons[] = {
-	{ KEY_UP,        "Up"     },
-	{ KEY_DOWN,      "Down"   },
-	{ KEY_LEFT,      "Left"   },
-	{ KEY_RIGHT,     "Right"  },
-	{ KEY_SPACE,     "A"      },
-	{ KEY_LEFTCTRL,  "B"      },
-	{ KEY_LEFTSHIFT, "X"      },
-	{ KEY_LEFTALT,   "Y"      },
-	{ KEY_TAB,       "L1"     },
-	{ KEY_BACKSPACE, "R1"     },
-	{ KEY_ENTER,     "Start"  },
-	{ KEY_RIGHTCTRL, "Select" },
-	{ KEY_ESC,       "Menu"   },
+	{ KEY_UP,    "Up"     },
+	{ KEY_DOWN,  "Down"   },
+	{ KEY_LEFT,  "Left"   },
+	{ KEY_RIGHT, "Right"  },
+	{ KEY_A,     "A"      },
+	{ KEY_B,     "B"      },
+	{ KEY_X,     "X"      },
+	{ KEY_Y,     "Y"      },
+	{ KEY_Q,     "L1"     },
+	{ KEY_W,     "L2"     },
+	{ KEY_E,     "R1"     },
+	{ KEY_R,     "R2"     },
+	{ KEY_ENTER, "Start"  },
+	{ KEY_ESC,   "Select" },
+	{ KEY_MENU,  "Menu"   },
+	{ KEY_POWER, "Power"  },
 };
 #define BT_NBTN ((int)(sizeof(bt_buttons) / sizeof(bt_buttons[0])))
 
