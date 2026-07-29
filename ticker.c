@@ -1,9 +1,12 @@
 /*
- * Now-playing ticker. The current module name (from music_current()) slides in
- * from the right decelerating, pauses in the centre, then slides off to the
- * left accelerating, looping while music plays. It is built from one label per
- * letter so each can jiggle on the Y axis while it moves. See ticker.h.
+ * Now-playing ticker. While music plays it alternates two messages -
+ * "<note> Now Playing... <note>" and "<note> <module name> <note>" - each of
+ * which slides in from the right decelerating, pauses in the centre, then
+ * slides off to the left accelerating. It is built from one label per glyph so
+ * each can jiggle on the Y axis while it moves. See ticker.h.
  */
+#include <stdio.h>
+
 #include "lvgl/lvgl.h"
 #include "ui.h"
 #include "music.h"
@@ -54,23 +57,40 @@ static void jiggle_resume_cb(lv_timer_t *t)
 	lv_timer_delete(t);
 }
 
-/* Build one label per character; return the total width. */
+/* Bytes in the UTF-8 sequence starting with 'b' (so multi-byte glyphs like the
+ * audio symbol become a single ticker cell). */
+static int utf8_len(unsigned char b)
+{
+	if (b < 0x80)          return 1;
+	if ((b & 0xE0) == 0xC0) return 2;
+	if ((b & 0xF0) == 0xE0) return 3;
+	if ((b & 0xF8) == 0xF0) return 4;
+	return 1;
+}
+
+/* Build one label per glyph (UTF-8 aware); return the total width. */
 static int32_t ticker_build(const char *text)
 {
 	int32_t x = 0;
+	const char *p = text;
 
 	lv_obj_clean(ticker_cont);
 	ticker_nchars = 0;
-	for (const char *p = text; *p && ticker_nchars < TICKER_MAXCHARS; p++) {
+	while (*p && ticker_nchars < TICKER_MAXCHARS) {
 		lv_obj_t *c = lv_label_create(ticker_cont);
-		char ch[2] = { *p, 0 };
+		char ch[5] = { 0 };
+		int n = utf8_len((unsigned char)*p), k;
+
+		for (k = 0; k < n && p[k]; k++)
+			ch[k] = p[k];
 
 		lv_obj_set_style_text_font(c, &lv_font_montserrat_16, 0);
 		lv_label_set_text(c, ch);
 		lv_obj_update_layout(c);
 		lv_obj_set_pos(c, x, JIGGLE_AMP);
-		x += lv_obj_get_width(c) + (*p == ' ' ? 3 : 0);
+		x += lv_obj_get_width(c) + (n == 1 && *p == ' ' ? 3 : 0);
 		ticker_chars[ticker_nchars++] = c;
+		p += n;
 	}
 	return x;
 }
@@ -123,7 +143,9 @@ static void ticker_start(const char *text)
 
 void ticker_poll(void)
 {
+	static int pass;                          /* alternates the two messages */
 	const char *name;
+	char text[TICKER_MAXCHARS + 32];
 
 	if (ticker_active || !ticker_cont)
 		return;
@@ -131,8 +153,15 @@ void ticker_poll(void)
 	if (!name)
 		return;
 
+	/* Alternate "<note> Now Playing... <note>" and "<note> <mod name> <note>".
+	 * LVGL has no music-note glyph, so the audio symbol stands in for it. */
+	if (pass++ & 1)
+		snprintf(text, sizeof(text), LV_SYMBOL_AUDIO " %s " LV_SYMBOL_AUDIO, name);
+	else
+		snprintf(text, sizeof(text), LV_SYMBOL_AUDIO " Now Playing... " LV_SYMBOL_AUDIO);
+
 	ticker_active = true;
-	ticker_start(name);
+	ticker_start(text);
 }
 
 void ticker_setup(lv_obj_t *parent)
