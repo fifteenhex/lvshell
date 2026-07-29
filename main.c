@@ -76,6 +76,61 @@ static void launch_handler(lv_event_t *e)
 /* The main menu is built on its own screen so a splash can show first. */
 static lv_obj_t *main_screen;
 
+/* ------------------------------------------------------------------------- */
+/* Cracktro-style background: subtle squares spinning and flying across.      */
+/* ------------------------------------------------------------------------- */
+
+#define BG_SQUARES 10
+
+static void bg_anim_x(void *var, int32_t v)
+{
+	lv_obj_set_x((lv_obj_t *)var, v);
+}
+
+static void bg_anim_rot(void *var, int32_t v)
+{
+	lv_obj_set_style_transform_rotation((lv_obj_t *)var, v, 0);
+}
+
+static void setup_background(lv_obj_t *parent)
+{
+	for (int i = 0; i < BG_SQUARES; i++) {
+		int sz = 18 + (i * 11) % 34;
+		lv_obj_t *sq = lv_obj_create(parent);
+		lv_anim_t ax, ar;
+
+		lv_obj_remove_flag(sq, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_size(sq, sz, sz);
+		lv_obj_set_style_radius(sq, 3, 0);
+		lv_obj_set_style_border_width(sq, 0, 0);
+		lv_obj_set_style_bg_color(sq, lv_palette_main(LV_PALETTE_BLUE), 0);
+		lv_obj_set_style_bg_opa(sq, LV_OPA_20, 0);   /* subtle */
+		lv_obj_set_style_transform_pivot_x(sq, sz / 2, 0);
+		lv_obj_set_style_transform_pivot_y(sq, sz / 2, 0);
+		lv_obj_set_y(sq, (i * 61) % 440);
+		lv_obj_move_background(sq);
+
+		/* Fly left -> right, looping, staggered. */
+		lv_anim_init(&ax);
+		lv_anim_set_var(&ax, sq);
+		lv_anim_set_exec_cb(&ax, bg_anim_x);
+		lv_anim_set_values(&ax, -sz, LVSHELL_HOR_RES);
+		lv_anim_set_duration(&ax, 6000 + (i * 500));
+		lv_anim_set_delay(&ax, i * 350);
+		lv_anim_set_repeat_count(&ax, LV_ANIM_REPEAT_INFINITE);
+		lv_anim_start(&ax);
+
+		/* Spin (angle is in 0.1 degree units). */
+		lv_anim_init(&ar);
+		lv_anim_set_var(&ar, sq);
+		lv_anim_set_exec_cb(&ar, bg_anim_rot);
+		lv_anim_set_values(&ar, 0, 3600);
+		lv_anim_set_duration(&ar, 4000 + (i * 300));
+		lv_anim_set_repeat_count(&ar, LV_ANIM_REPEAT_INFINITE);
+		lv_anim_start(&ar);
+	}
+}
+
 static void setup_battery(lv_obj_t *parent)
 {
 	lv_obj_t *batbar = lv_bar_create(parent);
@@ -206,6 +261,7 @@ static void build_about_screen(void)
 
 static void setup_ui(lv_obj_t *parent)
 {
+	setup_background(parent);
 	setup_battery(parent);
 	setup_screen_tag(parent);
 	setup_carousell(parent);
