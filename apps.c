@@ -327,6 +327,49 @@ static void discover_systems(void)
 	}
 }
 
+/*
+ * fake-08: PICO-8 carts. A cart distributed as a .p8.png is an ordinary PNG
+ * (the label art with the cart data steganographically tucked in), so the file
+ * doubles as the menu icon. Plain-text .p8 carts have no art.
+ */
+#define FAKE08_EXE "/usr/games/FAKE08"
+
+static void pico8_found(const char *dir, const char *name)
+{
+	char path[512], title[64];
+	const char *argv[] = { FAKE08_EXE, path, NULL };
+	const char *icon = NULL;
+	size_t tl;
+
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+
+	/* Title from the filename, minus the .p8.png / .p8 extension. */
+	snprintf(title, sizeof(title), "%s", name);
+	tl = strlen(title);
+	if (ends_with_ci(title, ".p8.png"))
+		title[tl - 7] = 0;
+	else if (ends_with_ci(title, ".p8"))
+		title[tl - 3] = 0;
+
+	/* A .p8.png renders directly as the card art. */
+	if (ends_with_ci(name, ".p8.png"))
+		icon = path;
+
+	apps_add(title, argv, NULL, icon);
+}
+
+static void discover_pico8(void)
+{
+	static const char *dirs[] = { "/data/pico8", "/data/roms/pico8", "/usr/share/pico-8", NULL };
+	static const char *exts[] = { ".p8", ".p8.png", NULL };
+
+	if (!path_exists(FAKE08_EXE))
+		return;
+
+	cur_group = "PICO-8";
+	for_each_data_file(dirs, exts, pico8_found);
+}
+
 /**********************************************************************************************************************/
 
 typedef void (*discover_fn)(void);
@@ -335,6 +378,7 @@ static const discover_fn discoverers[] = {
 	discover_doom,
 	discover_scummvm,
 	discover_systems,
+	discover_pico8,
 };
 
 int apps_discover(const struct app_entry **out)

@@ -425,6 +425,7 @@ static const char *group_icon(const char *name)
 		{ "WonderSwan",       "ws"      },
 		{ "Doom",             "doom"    },
 		{ "ScummVM",          "scummvm" },
+		{ "PICO-8",           "pico"    },
 		{ NULL, NULL },
 	};
 	static char path[80];
