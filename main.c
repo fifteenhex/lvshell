@@ -347,6 +347,8 @@ static lv_obj_t *carousel_panel(lv_obj_t *parent)
 	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
+	/* Slightly transparent so the animated background shows through. */
+	lv_obj_set_style_bg_opa(panel, LV_OPA_80, 0);
 	return panel;
 }
 
@@ -369,7 +371,8 @@ static void card_add_icon(lv_obj_t *btn, const char *icon)
 	img = lv_image_create(btn);
 	snprintf(src, sizeof(src), "L:%s", icon);
 	lv_image_set_src(img, src);
-	lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 10);
+	/* Centred in the card, nudged up to leave room for the title below. */
+	lv_obj_align(img, LV_ALIGN_CENTER, 0, -12);
 }
 
 static void card_add_label(lv_obj_t *btn, const char *text)
