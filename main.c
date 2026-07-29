@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <dirent.h>
+#include <linux/input.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -279,6 +281,7 @@ static void setup_screen_tag(lv_obj_t *parent)
 
 static lv_obj_t *settings_screen;
 static lv_obj_t *about_screen;
+static lv_obj_t *buttontest_screen;
 
 static void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 {
@@ -298,6 +301,7 @@ static void nav_main(lv_event_t *e)          { (void)e; nav_to(main_screen,     
 static void nav_settings(lv_event_t *e)      { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 static void nav_about(lv_event_t *e)         { (void)e; nav_to(about_screen,    LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 static void nav_back_settings(lv_event_t *e) { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
+static void nav_buttontest(lv_event_t *e)    { (void)e; nav_to(buttontest_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 
 static void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
 {
@@ -462,6 +466,11 @@ static void build_settings_screen(void)
 
 	make_focusable(lv_list_add_button(list, LV_SYMBOL_IMAGE, "Display")); /* placeholder */
 	make_focusable(lv_list_add_button(list, LV_SYMBOL_AUDIO, "Audio"));   /* placeholder */
+
+	lv_obj_t *btntest = lv_list_add_button(list, LV_SYMBOL_KEYBOARD, "Button Test");
+	make_focusable(btntest);
+	lv_obj_add_event_cb(btntest, nav_buttontest, LV_EVENT_CLICKED, NULL);
+
 	lv_obj_t *about = lv_list_add_button(list, LV_SYMBOL_LIST, "About");
 	make_focusable(about);
 	lv_obj_add_event_cb(about, nav_about, LV_EVENT_CLICKED, NULL);
@@ -490,6 +499,139 @@ static void build_about_screen(void)
 	about_row(cont, "System",   u.sysname);
 	about_row(cont, "Kernel",   kern);
 	about_row(cont, "Hostname", u.nodename);
+}
+
+/**********************************************************************************************************************/
+/* Button test: a live view of the hardware buttons via the input (evdev) layer                                       */
+/**********************************************************************************************************************/
+
+#define BT_MAX_FDS 16
+
+static int       bt_fds[BT_MAX_FDS];
+static int       bt_nfds;
+static lv_obj_t *bt_last_label;
+
+/*
+ * Best-effort Miyoo Mini gpio-keys -> label map. Button-to-keycode mapping is
+ * firmware specific, so the "Last" readout below always shows the raw code for
+ * anything not listed here.
+ */
+static const struct bt_btn {
+	int         code;
+	const char *label;
+} bt_buttons[] = {
+	{ KEY_UP,        "Up"     },
+	{ KEY_DOWN,      "Down"   },
+	{ KEY_LEFT,      "Left"   },
+	{ KEY_RIGHT,     "Right"  },
+	{ KEY_SPACE,     "A"      },
+	{ KEY_LEFTCTRL,  "B"      },
+	{ KEY_LEFTSHIFT, "X"      },
+	{ KEY_LEFTALT,   "Y"      },
+	{ KEY_TAB,       "L1"     },
+	{ KEY_BACKSPACE, "R1"     },
+	{ KEY_ENTER,     "Start"  },
+	{ KEY_RIGHTCTRL, "Select" },
+	{ KEY_ESC,       "Menu"   },
+};
+#define BT_NBTN ((int)(sizeof(bt_buttons) / sizeof(bt_buttons[0])))
+
+static lv_obj_t *bt_indicator[BT_NBTN];
+
+static void bt_open(void)
+{
+	DIR *d = opendir("/dev/input");
+	struct dirent *e;
+
+	bt_nfds = 0;
+	if (!d)
+		return;
+	while ((e = readdir(d)) && bt_nfds < BT_MAX_FDS) {
+		char path[64];
+		int fd;
+
+		if (strncmp(e->d_name, "event", 5) != 0)
+			continue;
+		snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
+		/* evdev broadcasts to every reader, so this doesn't steal events
+		 * from the SDL/DirectFB input. */
+		fd = open(path, O_RDONLY | O_NONBLOCK);
+		if (fd >= 0)
+			bt_fds[bt_nfds++] = fd;
+	}
+	closedir(d);
+}
+
+static void bt_event(int code, int down)
+{
+	const char *name = NULL;
+
+	for (int i = 0; i < BT_NBTN; i++) {
+		if (bt_buttons[i].code != code)
+			continue;
+		name = bt_buttons[i].label;
+		if (bt_indicator[i])
+			lv_obj_set_style_bg_color(bt_indicator[i],
+				down ? lv_palette_main(LV_PALETTE_GREEN)
+				     : lv_palette_darken(LV_PALETTE_GREY, 3), 0);
+	}
+
+	if (bt_last_label) {
+		if (name)
+			lv_label_set_text_fmt(bt_last_label, "Last: %s (KEY %d) %s",
+				name, code, down ? "down" : "up");
+		else
+			lv_label_set_text_fmt(bt_last_label, "Last: KEY %d %s",
+				code, down ? "down" : "up");
+	}
+}
+
+static void bt_poll(void)
+{
+	struct input_event ev;
+
+	for (int i = 0; i < bt_nfds; i++)
+		while (read(bt_fds[i], &ev, sizeof(ev)) == (ssize_t)sizeof(ev))
+			if (ev.type == EV_KEY && ev.value != 2)   /* skip autorepeat */
+				bt_event(ev.code, ev.value);
+}
+
+static void build_buttontest_screen(void)
+{
+	lv_obj_t *grid, *hint;
+
+	buttontest_screen = lv_obj_create(NULL);
+	screen_group_begin(buttontest_screen);
+	make_header(buttontest_screen, "Button Test", nav_back_settings);
+
+	grid = lv_obj_create(buttontest_screen);
+	lv_obj_set_size(grid, lv_pct(96), lv_pct(56));
+	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, 45);
+	lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+	lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY,
+			LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	for (int i = 0; i < BT_NBTN; i++) {
+		lv_obj_t *cell = lv_obj_create(grid);
+		lv_obj_t *l;
+
+		lv_obj_set_size(cell, 84, 46);
+		lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_style_bg_color(cell, lv_palette_darken(LV_PALETTE_GREY, 3), 0);
+		l = lv_label_create(cell);
+		lv_label_set_text(l, bt_buttons[i].label);
+		lv_obj_center(l);
+		bt_indicator[i] = cell;
+	}
+
+	bt_last_label = lv_label_create(buttontest_screen);
+	lv_label_set_text(bt_last_label, "Last: -");
+	lv_obj_align(bt_last_label, LV_ALIGN_BOTTOM_MID, 0, -30);
+
+	hint = lv_label_create(buttontest_screen);
+	lv_label_set_text(hint, "Press a button; its box lights up.");
+	lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
 static void setup_ui(lv_obj_t *parent)
@@ -727,6 +869,12 @@ static void ctl_poll(void)
 				lv_group_focus_next(cur_group);
 		}
 	}
+	else if (!strcmp(cmd, "press")) {
+		/* Activate the focused item, as the A button would. */
+		lv_obj_t *o = cur_group ? lv_group_get_focused(cur_group) : NULL;
+		if (o)
+			lv_obj_send_event(o, LV_EVENT_CLICKED, NULL);
+	}
 	else if (!strcmp(cmd, "launch")) {
 		char *arg = strtok_r(NULL, " \t\r\n", &save);
 		ctl_launch(arg ? atoi(arg) : 0);
@@ -760,6 +908,8 @@ int main(int argc, char **argv)
 	setup_ui(main_screen);
 	build_settings_screen();
 	build_about_screen();
+	build_buttontest_screen();
+	bt_open();
 
 	ctl_init();
 	show_splash();
@@ -771,6 +921,7 @@ int main(int argc, char **argv)
 		 */
 		ctl_poll();
 		dp_poll();
+		bt_poll();
 		lv_timer_handler();
 		usleep(5 * 1000);
 	}
