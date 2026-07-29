@@ -163,6 +163,17 @@ static void setup_carousell(lv_obj_t *parent)
 		lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
 		lv_obj_add_event_cb(btn, launch_handler, LV_EVENT_ALL,
 				(void *)&cntx.apps[i]);
+
+		/* Cover icon, if the discoverer found one for this game. */
+		if (cntx.apps[i].icon[0]) {
+			char src[200];
+			lv_obj_t *img = lv_image_create(btn);
+
+			snprintf(src, sizeof(src), "L:%s", cntx.apps[i].icon);
+			lv_image_set_src(img, src);
+			lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 10);
+		}
+
 		lv_obj_t *label = lv_label_create(btn);
 		lv_label_set_text(label, cntx.apps[i].title);
 		lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
