@@ -135,6 +135,40 @@ void make_focusable(lv_obj_t *obj)
 	lv_obj_add_style(obj, &style_focus, LV_STATE_FOCUSED);
 }
 
+/* The visible text of a focusable widget: the first label somewhere beneath it
+ * (game cards and list buttons both carry their name in a child label). */
+static const char *obj_label_text(lv_obj_t *o)
+{
+	uint32_t n = lv_obj_get_child_count(o);
+
+	for (uint32_t i = 0; i < n; i++) {
+		lv_obj_t *c = lv_obj_get_child(o, i);
+		if (lv_obj_check_type(c, &lv_label_class))
+			return lv_label_get_text(c);
+		const char *deep = obj_label_text(c);
+		if (deep)
+			return deep;
+	}
+	return NULL;
+}
+
+/* Report the highlighted item on the event FIFO so a controller/tester can see
+ * what the D-pad has landed on (echo'd as "selected <name>"). */
+static void focus_cb(lv_group_t *g)
+{
+	lv_obj_t *o = lv_group_get_focused(g);
+	const char *t = o ? obj_label_text(o) : NULL;
+	char name[96];
+	size_t i;
+
+	/* Flatten to one line: card labels can carry a "\n<count>" suffix. */
+	for (i = 0; t && t[i] && i < sizeof(name) - 1; i++)
+		name[i] = (t[i] == '\n') ? ' ' : t[i];
+	name[i] = 0;
+
+	evt_emit("selected %s", t ? name : "?");
+}
+
 /* Start a fresh focus group for a screen; widgets created afterwards join it
  * (it becomes the default group). */
 lv_group_t *screen_group_begin(lv_obj_t *scr)
@@ -142,6 +176,7 @@ lv_group_t *screen_group_begin(lv_obj_t *scr)
 	lv_group_t *g = lv_group_create();
 
 	lv_group_set_default(g);
+	lv_group_set_focus_cb(g, focus_cb);
 	if (num_screen_groups < MAX_SCREEN_GROUPS) {
 		screen_groups[num_screen_groups].scr = scr;
 		screen_groups[num_screen_groups].grp = g;
@@ -332,8 +367,16 @@ void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 	if (g) {
 		cur_group = g;
 		input_set_group(g);
-		/* Make sure something on the new screen is highlighted. */
-		if (!lv_group_get_focused(g))
+		/* Highlight the first *content* item, not the Back button. The
+		 * Back button is created first by make_header, so it heads the
+		 * group and LVGL auto-focuses it when the group is populated;
+		 * advance past it (tagged USER_1) on entry. */
+		lv_obj_t *f = lv_group_get_focused(g);
+		if (!f) {
+			lv_group_focus_next(g);
+			f = lv_group_get_focused(g);
+		}
+		if (f && lv_obj_has_flag(f, LV_OBJ_FLAG_USER_1))
 			lv_group_focus_next(g);
 	}
 	lv_screen_load_anim(scr, anim, 250, 0, false);
@@ -351,6 +394,8 @@ void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
 	lv_obj_t *btn = lv_button_create(scr);
 	lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 5, 5);
 	make_focusable(btn);
+	/* Tag as the Back button so nav_to can skip it for initial focus. */
+	lv_obj_add_flag(btn, LV_OBJ_FLAG_USER_1);
 	lv_obj_add_event_cb(btn, back_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *bl = lv_label_create(btn);
 	lv_label_set_text(bl, LV_SYMBOL_LEFT " Back");
@@ -567,6 +612,11 @@ static void build_settings_screen(void)
 	lv_obj_t *list = lv_list_create(settings_screen);
 	lv_obj_set_size(list, lv_pct(96), lv_pct(78));
 	lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -6);
+	/* Inset the buttons from the list edges so the focus outline (drawn a
+	 * few px outside the item) isn't clipped by the list's clip area, and
+	 * add a row gap so a highlighted item's outline clears its neighbours. */
+	lv_obj_set_style_pad_all(list, 8, 0);
+	lv_obj_set_style_pad_row(list, 6, 0);
 
 	make_focusable(lv_list_add_button(list, LV_SYMBOL_IMAGE, "Display")); /* placeholder */
 	make_focusable(lv_list_add_button(list, LV_SYMBOL_AUDIO, "Audio"));   /* placeholder */
@@ -935,6 +985,19 @@ int main(int argc, char **argv)
 
 	while (1) {
 		uint32_t wait;
+
+		/* Liveness beat on the event FIFO once a second. If these stop, the
+		 * main loop is wedged (e.g. blocked in the DirectFB flush) rather
+		 * than merely idle - a reader can tell "dead" from "quiet". */
+		{
+			static uint32_t last_hb;
+			uint32_t now = lv_tick_get();
+
+			if (now - last_hb >= 1000) {
+				last_hb = now;
+				evt_emit("heartbeat %u", now);
+			}
+		}
 
 		ctl_poll();
 		game_poll();
