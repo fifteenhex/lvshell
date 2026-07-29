@@ -170,58 +170,46 @@ static void setup_battery(lv_obj_t *parent)
 	lv_bar_set_value(batbar, 50, LV_ANIM_OFF);
 }
 
-static void setup_carousell(lv_obj_t *parent)
+/*
+ * Discovered entries are grouped by their "app" (ScummVM, Doom, ...). The main
+ * screen shows one card per group; opening a group shows its games.
+ */
+#define MAX_GROUPS 12
+
+struct app_group {
+	const char             *name;
+	const struct app_entry *members[APP_MAX_ENTRIES];
+	int                     count;
+	lv_obj_t               *screen;
+};
+
+static struct app_group groups[MAX_GROUPS];
+static int              num_groups;
+
+static void build_groups(void)
 {
-	lv_obj_t *panel = lv_obj_create(parent);
-	lv_obj_set_size(panel, lv_pct(100), lv_pct(60));
-	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
-
-	if (cntx.num_apps == 0) {
-		/* Nothing runnable was found - say so rather than show a blank strip. */
-		lv_obj_t *label = lv_label_create(panel);
-		lv_label_set_text(label,
-				"No games found.\n"
-				"Add WADs or ROMs under /data and restart.");
-		lv_obj_center(label);
-		return;
-	}
-
-	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
-	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
-
+	num_groups = 0;
 	for (int i = 0; i < cntx.num_apps; i++) {
-		lv_obj_t *btn = lv_button_create(panel);
-		lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
-		lv_obj_add_event_cb(btn, launch_handler, LV_EVENT_ALL,
-				(void *)&cntx.apps[i]);
+		const char *g = cntx.apps[i].group;
+		int gi = -1;
 
-		/* Cover icon, if the discoverer found one for this game. */
-		if (cntx.apps[i].icon[0]) {
-			char src[200];
-			lv_obj_t *img = lv_image_create(btn);
-
-			snprintf(src, sizeof(src), "L:%s", cntx.apps[i].icon);
-#ifdef LVSHELL_DEBUG
-			{
-				lv_image_header_t hdr;
-				lv_result_t ir = lv_image_decoder_get_info(src, &hdr);
-
-				DBG("icon %d: %s info=%d %dx%d\n",
-					i, src, (int)ir, (int)hdr.w, (int)hdr.h);
+		for (int j = 0; j < num_groups; j++) {
+			if (!strcmp(groups[j].name, g)) {
+				gi = j;
+				break;
 			}
-#endif
-			lv_image_set_src(img, src);
-			lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 10);
 		}
-
-		lv_obj_t *label = lv_label_create(btn);
-		lv_label_set_text(label, cntx.apps[i].title);
-		lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-		lv_obj_set_width(label, lv_pct(90));
-		lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
+		if (gi < 0) {
+			if (num_groups >= MAX_GROUPS)
+				continue;
+			gi = num_groups++;
+			groups[gi].name = g;
+			groups[gi].count = 0;
+			groups[gi].screen = NULL;
+		}
+		if (groups[gi].count < APP_MAX_ENTRIES)
+			groups[gi].members[groups[gi].count++] = &cntx.apps[i];
 	}
-
-	lv_obj_update_snap(panel, LV_ANIM_ON);
 }
 
 static void setup_screen_tag(lv_obj_t *parent)
@@ -269,6 +257,133 @@ static void about_row(lv_obj_t *parent, const char *key, const char *val)
 {
 	lv_obj_t *l = lv_label_create(parent);
 	lv_label_set_text_fmt(l, "%s:  %s", key, val);
+}
+
+/**********************************************************************************************************************/
+/* Carousel cards (games and app groups)                                                                              */
+/**********************************************************************************************************************/
+
+/* A horizontal, centre-snapping strip filling the middle of a screen. */
+static lv_obj_t *carousel_panel(lv_obj_t *parent)
+{
+	lv_obj_t *panel = lv_obj_create(parent);
+
+	lv_obj_set_size(panel, lv_pct(100), lv_pct(60));
+	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
+	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
+	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
+	return panel;
+}
+
+static void empty_message(lv_obj_t *panel, const char *msg)
+{
+	lv_obj_t *label = lv_label_create(panel);
+
+	lv_label_set_text(label, msg);
+	lv_obj_center(label);
+}
+
+static void card_add_icon(lv_obj_t *btn, const char *icon)
+{
+	char src[200];
+	lv_obj_t *img;
+
+	if (!icon || !icon[0])
+		return;
+
+	img = lv_image_create(btn);
+	snprintf(src, sizeof(src), "L:%s", icon);
+	lv_image_set_src(img, src);
+	lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 10);
+}
+
+static void card_add_label(lv_obj_t *btn, const char *text)
+{
+	lv_obj_t *label = lv_label_create(btn);
+
+	lv_label_set_text(label, text);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(label, lv_pct(90));
+	lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -10);
+}
+
+/* One launchable game. */
+static void add_game_card(lv_obj_t *panel, const struct app_entry *app)
+{
+	lv_obj_t *btn = lv_button_create(panel);
+
+	lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
+	lv_obj_add_event_cb(btn, launch_handler, LV_EVENT_ALL, (void *)app);
+	card_add_icon(btn, app->icon);
+	card_add_label(btn, app->title);
+}
+
+static void group_open_cb(lv_event_t *e)
+{
+	nav_to(lv_event_get_user_data(e), LV_SCR_LOAD_ANIM_MOVE_LEFT);
+}
+
+/* One app group; clicking it opens that group's screen. */
+static void add_group_card(lv_obj_t *panel, struct app_group *grp)
+{
+	lv_obj_t *btn = lv_button_create(panel);
+	const char *icon = NULL;
+	char sub[64];
+
+	lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
+	lv_obj_add_event_cb(btn, group_open_cb, LV_EVENT_CLICKED, grp->screen);
+
+	/* Represent the group with its first member's cover, if any. */
+	for (int i = 0; i < grp->count; i++) {
+		if (grp->members[i]->icon[0]) {
+			icon = grp->members[i]->icon;
+			break;
+		}
+	}
+	card_add_icon(btn, icon);
+
+	snprintf(sub, sizeof(sub), "%s\n%d game%s", grp->name,
+		 grp->count, grp->count == 1 ? "" : "s");
+	card_add_label(btn, sub);
+}
+
+/* Main screen: one card per app group. */
+static void setup_group_carousel(lv_obj_t *parent)
+{
+	lv_obj_t *panel = carousel_panel(parent);
+
+	if (num_groups == 0) {
+		empty_message(panel,
+				"No games found.\n"
+				"Add WADs or ROMs under /data and restart.");
+		return;
+	}
+
+	for (int i = 0; i < num_groups; i++)
+		add_group_card(panel, &groups[i]);
+
+	lv_obj_update_snap(panel, LV_ANIM_ON);
+}
+
+/* Build a per-group screen listing that group's games. */
+static void build_group_screens(void)
+{
+	for (int i = 0; i < num_groups; i++) {
+		lv_obj_t *scr = lv_obj_create(NULL);
+		lv_obj_t *panel;
+
+		lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
+		setup_background(scr);
+		make_header(scr, groups[i].name, nav_main);
+
+		panel = carousel_panel(scr);
+		for (int j = 0; j < groups[i].count; j++)
+			add_game_card(panel, groups[i].members[j]);
+		lv_obj_update_snap(panel, LV_ANIM_ON);
+
+		groups[i].screen = scr;
+	}
 }
 
 static void build_settings_screen(void)
@@ -319,7 +434,7 @@ static void setup_ui(lv_obj_t *parent)
 	setup_background(parent);
 	setup_battery(parent);
 	setup_screen_tag(parent);
-	setup_carousell(parent);
+	setup_group_carousel(parent);
 
 	/* Settings button, top-left. */
 	lv_obj_t *sbtn = lv_button_create(parent);
@@ -519,6 +634,12 @@ static void ctl_poll(void)
 		else
 			show_datapart_dialog();
 	}
+	else if (!strcmp(cmd, "group")) {
+		char *arg = strtok_r(NULL, " \t\r\n", &save);
+		int g = arg ? atoi(arg) : 0;
+		if (g >= 0 && g < num_groups && groups[g].screen)
+			nav_to(groups[g].screen, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+	}
 	else if (!strcmp(cmd, "launch")) {
 		char *arg = strtok_r(NULL, " \t\r\n", &save);
 		ctl_launch(arg ? atoi(arg) : 0);
@@ -546,6 +667,8 @@ int main(int argc, char **argv)
 	}
 
 	main_screen = lv_obj_create(NULL);
+	build_groups();
+	build_group_screens();
 	setup_ui(main_screen);
 	build_settings_screen();
 	build_about_screen();
