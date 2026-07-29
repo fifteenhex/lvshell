@@ -1,4 +1,4 @@
-/* needed for usleep() */
+/* for strdup(), etc. */
 #define _DEFAULT_SOURCE
 #include <stdlib.h>
 #include <stdio.h>
@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <poll.h>
 #include <dirent.h>
 #include <linux/input.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
@@ -706,35 +707,40 @@ static lv_obj_t *ticker_cont;                     /* one label per glyph */
 static lv_obj_t *ticker_chars[TICKER_MAXCHARS];
 static int       ticker_nchars;
 static bool      ticker_active;
+static bool      jiggle_on;                       /* wobble the letters? */
+static int32_t   jiggle_amp;                      /* current amplitude, 8.8 fixed */
 
 static void ticker_set_x(void *var, int32_t v) { lv_obj_set_x((lv_obj_t *)var, v); }
-static void jiggle_cb(void *var, int32_t v)    { lv_obj_set_y((lv_obj_t *)var, v); }
 
-/* Wobble each letter on the Y axis, phase-shifted, while the ticker moves. */
-static void jiggle_start(uint32_t delay)
+/*
+ * Wobble the letters on the Y axis, phase-shifted. The amplitude eases toward
+ * its target (full while sliding, zero while paused) so starting and stopping
+ * the jiggle isn't jarring. Runs off a periodic timer.
+ */
+static void jiggle_timer_cb(lv_timer_t *t)
 {
-	for (int i = 0; i < ticker_nchars; i++) {
-		lv_anim_t a;
+	int32_t target = jiggle_on ? (JIGGLE_AMP << 8) : 0;
+	uint32_t tick;
 
-		lv_anim_init(&a);
-		lv_anim_set_var(&a, ticker_chars[i]);
-		lv_anim_set_exec_cb(&a, jiggle_cb);
-		lv_anim_set_values(&a, 0, 2 * JIGGLE_AMP);
-		lv_anim_set_duration(&a, 160);
-		lv_anim_set_playback_duration(&a, 160);
-		lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-		lv_anim_set_delay(&a, delay + i * 25);   /* phase offset per letter */
-		lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-		lv_anim_start(&a);
+	(void)t;
+	jiggle_amp += (target - jiggle_amp) >> 3;   /* exponential ease (~1/8) */
+	if (ticker_nchars == 0)
+		return;
+
+	tick = lv_tick_get();
+	for (int i = 0; i < ticker_nchars; i++) {
+		int32_t ang = (int32_t)((tick / 2 + i * 50) % 360);
+		int32_t off = ((jiggle_amp >> 8) * lv_trigo_sin(ang)) / 32767;
+
+		lv_obj_set_y(ticker_chars[i], JIGGLE_AMP + off);
 	}
 }
 
-static void jiggle_stop(void)
+/* Resume jiggling when the slide-out starts (one-shot). */
+static void jiggle_resume_cb(lv_timer_t *t)
 {
-	for (int i = 0; i < ticker_nchars; i++) {
-		lv_anim_delete(ticker_chars[i], jiggle_cb);
-		lv_obj_set_y(ticker_chars[i], JIGGLE_AMP);   /* rest at the mid line */
-	}
+	jiggle_on = true;
+	lv_timer_delete(t);
 }
 
 /* Build one label per character; return the total width. */
@@ -761,7 +767,7 @@ static int32_t ticker_build(const char *text)
 static void ticker_out_done(lv_anim_t *a)
 {
 	(void)a;
-	jiggle_stop();
+	jiggle_on = false;
 	ticker_active = false;   /* ticker_poll() may start the next pass */
 }
 
@@ -772,7 +778,7 @@ static void ticker_in_done(lv_anim_t *a)
 	lv_anim_t out;
 
 	(void)a;
-	jiggle_stop();
+	jiggle_on = false;   /* calm during the centre pause (eases out) */
 	lv_anim_init(&out);
 	lv_anim_set_var(&out, ticker_cont);
 	lv_anim_set_exec_cb(&out, ticker_set_x);
@@ -782,7 +788,8 @@ static void ticker_in_done(lv_anim_t *a)
 	lv_anim_set_path_cb(&out, lv_anim_path_ease_in);
 	lv_anim_set_completed_cb(&out, ticker_out_done);
 	lv_anim_start(&out);
-	jiggle_start(TICKER_PAUSE_MS);   /* jiggle again once it starts moving out */
+	/* Jiggle again (eases in) once it starts moving out. */
+	lv_timer_create(jiggle_resume_cb, TICKER_PAUSE_MS, NULL);
 }
 
 /* Slide the name in from the right (decelerating) to the centre, jiggling. */
@@ -800,7 +807,7 @@ static void ticker_start(const char *text)
 	lv_anim_set_path_cb(&in, lv_anim_path_ease_out);
 	lv_anim_set_completed_cb(&in, ticker_in_done);
 	lv_anim_start(&in);
-	jiggle_start(0);
+	jiggle_on = true;   /* eases in from flat */
 }
 
 static void ticker_poll(void)
@@ -838,6 +845,7 @@ static void setup_ui(lv_obj_t *parent)
 	lv_obj_set_size(ticker_cont, 10, 16 + 2 * JIGGLE_AMP);
 	lv_obj_set_y(ticker_cont, LVSHELL_VER_RES - 74);
 	lv_obj_set_x(ticker_cont, LVSHELL_HOR_RES);
+	lv_timer_create(jiggle_timer_cb, 16, NULL);
 
 	/* Occasional bursts of fast, random-coloured squares over the background. */
 	lv_timer_create(spawn_color_squares, 3000, parent);
@@ -1078,6 +1086,30 @@ static void ctl_poll(void)
 	}
 }
 
+/*
+ * Sleep until the next LVGL work is due (its return from lv_timer_handler is
+ * effectively the animation/refresh cadence) or a bit sooner, but wake up
+ * immediately if input arrives on the control FIFO or an input device. This
+ * keeps the UI responsive while not busy-spinning like a fixed usleep.
+ */
+static void loop_wait(uint32_t timeout_ms)
+{
+	struct pollfd fds[BT_MAX_FDS + 1];
+	int n = 0;
+
+	for (int i = 0; i < bt_nfds; i++) {
+		fds[n].fd = bt_fds[i];
+		fds[n].events = POLLIN;
+		n++;
+	}
+	if (ctl_fd >= 0) {
+		fds[n].fd = ctl_fd;
+		fds[n].events = POLLIN;
+		n++;
+	}
+	poll(fds, n, (int)timeout_ms);
+}
+
 int main(int argc, char **argv)
 {
 	dbg_init();
@@ -1117,18 +1149,22 @@ int main(int argc, char **argv)
 	show_splash();
 
 	while (1) {
-		/*
-		 * Periodically call the lv_task handler.
-		 * It could be done in a timer interrupt or an OS task too.
-		 */
+		uint32_t wait;
+
 		ctl_poll();
 		dp_poll();
 		bt_poll();
 		game_poll();
 		music_poll();
 		ticker_poll();
-		lv_timer_handler();
-		usleep(5 * 1000);
+
+		/* lv_timer_handler() returns how long until it next needs to run
+		 * (small while animating, larger when idle). Cap it so the non-LVGL
+		 * pollers above (child reaping, FIFO) still run promptly. */
+		wait = lv_timer_handler();
+		if (wait > 30)
+			wait = 30;
+		loop_wait(wait);
 	}
 
 	return 0;

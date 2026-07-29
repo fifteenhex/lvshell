@@ -122,6 +122,46 @@ static int blkpg_add(int fd, uint32_t start, uint32_t size)
 	return ioctl(fd, BLKPG, &arg);
 }
 
+/* Create the standard data directories and a README explaining them. */
+static void populate_data(void)
+{
+	static const char *dirs[] = {
+		"scummvm", "doom", "music", "roms",
+		/* one sub-directory per console for the emulator ROMs */
+		"roms/nes", "roms/snes", "roms/gb", "roms/gba", "roms/genesis",
+		"roms/sms", "roms/gamegear", "roms/pcengine", "roms/lynx",
+		"roms/ngp", "roms/wonderswan",
+		NULL
+	};
+	static const char readme[] =
+		"Miyoo Mini data partition\n"
+		"=========================\n"
+		"\n"
+		"Put your files in these folders; the shell picks them up on the\n"
+		"next start:\n"
+		"\n"
+		"  scummvm/<game>/   ScummVM games, one folder per game\n"
+		"  doom/             Doom IWADs (doom2.wad, ...)\n"
+		"  roms/<system>/    console ROMs for mednafen, one folder per system\n"
+		"                    (nes, snes, gb, gba, genesis, ...)\n"
+		"  music/            background music modules (.mod, .xm, .it, ...)\n";
+	char path[128];
+	int i, fd;
+
+	for (i = 0; dirs[i]; i++) {
+		snprintf(path, sizeof(path), "%s/%s", DATA_DIR, dirs[i]);
+		mkdir(path, 0777);
+	}
+
+	snprintf(path, sizeof(path), "%s/README.txt", DATA_DIR);
+	fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
+	if (fd >= 0) {
+		if (write(fd, readme, sizeof(readme) - 1) < 0)
+			perror("write README");
+		close(fd);
+	}
+}
+
 static int do_create(void)
 {
 	uint32_t start, size;
@@ -170,6 +210,7 @@ static int do_create(void)
 	/* If it already holds a filesystem, just mount it; only format fresh ones. */
 	if (!fresh && mount(PART, DATA_DIR, "exfat", 0, NULL) == 0) {
 		printf("datapart: mounted existing %s at %s\n", PART, DATA_DIR);
+		populate_data();
 		return 0;
 	}
 
@@ -185,6 +226,7 @@ static int do_create(void)
 	}
 
 	printf("datapart: mounted at %s\n", DATA_DIR);
+	populate_data();
 	return 0;
 }
 
