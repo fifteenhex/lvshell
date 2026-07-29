@@ -270,19 +270,39 @@ static void mednafen_found(const char *dir, const char *name)
 	apps_add(name, argv, NULL, NULL);
 }
 
+static const char *const mednafen_exts[] = {
+	".nes", ".fds", ".gb", ".gbc", ".gba", ".sfc", ".smc", ".md", ".gen",
+	".sms", ".gg", ".pce", ".lnx", ".ngp", ".ngc", ".ws", ".wsc", NULL
+};
+
 static void discover_mednafen(void)
 {
 	static const char *dirs[] = { "/data/roms", "/data", NULL };
-	static const char *exts[] = {
-		".nes", ".fds", ".gb", ".gbc", ".gba", ".sfc", ".smc", ".md", ".gen",
-		".sms", ".gg", ".pce", ".lnx", ".ngp", ".ngc", ".ws", ".wsc", NULL
-	};
+	const char *roms = "/data/roms";
+	DIR *dp;
+	struct dirent *e;
 
 	if (!path_exists(MEDNAFEN_EXE))
 		return;
 
 	cur_group = "Mednafen";
-	for_each_data_file(dirs, exts, mednafen_found);
+	for_each_data_file(dirs, mednafen_exts, mednafen_found);
+
+	/* ROMs are organised in a per-system sub-directory of /data/roms; scan
+	 * each of those too. */
+	dp = opendir(roms);
+	if (!dp)
+		return;
+	while ((e = readdir(dp))) {
+		char sub[256];
+		const char *subdir[2] = { sub, NULL };
+
+		if (e->d_name[0] == '.')
+			continue;
+		snprintf(sub, sizeof(sub), "%s/%s", roms, e->d_name);
+		for_each_data_file(subdir, mednafen_exts, mednafen_found);
+	}
+	closedir(dp);
 }
 
 /**********************************************************************************************************************/
