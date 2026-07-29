@@ -22,8 +22,9 @@
 static struct app_entry entries[APP_MAX_ENTRIES];
 static int              num_entries;
 
-/* The sink discoverers report through. */
-static void apps_add(const char *title, const char *const argv[], const char *dir)
+/* The sink discoverers report through. 'dir' and 'icon' may be NULL. */
+static void apps_add(const char *title, const char *const argv[],
+		     const char *dir, const char *icon)
 {
 	struct app_entry *e;
 	int i;
@@ -38,6 +39,8 @@ static void apps_add(const char *title, const char *const argv[], const char *di
 		e->argv[i] = strdup(argv[i]);
 	if (dir)
 		strncpy(e->dir, dir, sizeof(e->dir) - 1);
+	if (icon)
+		strncpy(e->icon, icon, sizeof(e->icon) - 1);
 }
 
 /**********************************************************************************************************************/
@@ -126,7 +129,7 @@ static void doom_found(const char *dir, const char *name)
 
 	snprintf(path, sizeof(path), "%s/%s", dir, name);
 	doom_title(name, title, sizeof(title));
-	apps_add(title, argv, NULL);
+	apps_add(title, argv, NULL, NULL);
 }
 
 static void discover_doom(void)
@@ -168,6 +171,42 @@ static int split_columns(char *line, char **fields, int max)
 }
 
 /*
+ * Map a scummvm game id ("engine:game") to its icon, installed by the
+ * scummvm-icons package as <engine>-<game>.png. Falls back to a generic
+ * per-engine <engine>.png. Leaves 'out' empty if no icon is present.
+ */
+#define SCUMMVM_ICON_DIR "/usr/share/scummvm/icons"
+
+static void scummvm_icon(const char *gameid, char *out, size_t outlen)
+{
+	char id[128];
+	const char *colon;
+	size_t i;
+
+	out[0] = 0;
+
+	/* "engine:game" -> "engine-game" */
+	for (i = 0; gameid[i] && i < sizeof(id) - 1; i++)
+		id[i] = gameid[i] == ':' ? '-' : gameid[i];
+	id[i] = 0;
+
+	snprintf(out, outlen, "%s/%s.png", SCUMMVM_ICON_DIR, id);
+	if (path_exists(out))
+		return;
+
+	/* Generic per-engine icon: keep the part before the '-'. */
+	colon = strchr(id, '-');
+	if (colon) {
+		snprintf(out, outlen, "%s/%.*s.png", SCUMMVM_ICON_DIR,
+			 (int)(colon - id), id);
+		if (path_exists(out))
+			return;
+	}
+
+	out[0] = 0;
+}
+
+/*
  * ScummVM: ask it which games live under the data dir (no hardcoded game list)
  * and add one entry each, launching the game directly instead of the launcher.
  */
@@ -188,6 +227,7 @@ static void discover_scummvm(void)
 	while (fgets(line, sizeof(line), fp)) {
 		char *f[3];
 		char pathopt[600];
+		char icon[192];
 		const char *argv[4];
 
 		/* Skip everything before the "GameID  Description  Full Path" header. */
@@ -207,7 +247,8 @@ static void discover_scummvm(void)
 		argv[1] = pathopt;
 		argv[2] = "--auto-detect";
 		argv[3] = NULL;
-		apps_add(f[1], argv, NULL);
+		scummvm_icon(f[0], icon, sizeof(icon));
+		apps_add(f[1], argv, NULL, icon[0] ? icon : NULL);
 	}
 
 	pclose(fp);
@@ -222,7 +263,7 @@ static void mednafen_found(const char *dir, const char *name)
 	const char *argv[] = { MEDNAFEN_EXE, path, NULL };
 
 	snprintf(path, sizeof(path), "%s/%s", dir, name);
-	apps_add(name, argv, NULL);
+	apps_add(name, argv, NULL, NULL);
 }
 
 static void discover_mednafen(void)
