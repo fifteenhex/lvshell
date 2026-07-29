@@ -221,7 +221,10 @@
         #define LV_DRAW_SW_CIRCLE_CACHE_SIZE 4
     #endif
 
-    #define  LV_USE_DRAW_SW_ASM     LV_DRAW_SW_ASM_NONE
+    /* Cortex-A7 has NEON; use LVGL's hand-written NEON assembly for the blend/
+     * fill hot paths (RGB565/ARGB8888/RGB888). The C compiler barely vectorises
+     * these loops on its own, so this is a large CPU win for the menu render. */
+    #define  LV_USE_DRAW_SW_ASM     LV_DRAW_SW_ASM_NEON
 
     #if LV_USE_DRAW_SW_ASM == LV_DRAW_SW_ASM_CUSTOM
         #define  LV_DRAW_SW_ASM_CUSTOM_INCLUDE ""
