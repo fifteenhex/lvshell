@@ -332,8 +332,16 @@ void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 	if (g) {
 		cur_group = g;
 		input_set_group(g);
-		/* Make sure something on the new screen is highlighted. */
-		if (!lv_group_get_focused(g))
+		/* Highlight the first *content* item, not the Back button. The
+		 * Back button is created first by make_header, so it heads the
+		 * group and LVGL auto-focuses it when the group is populated;
+		 * advance past it (tagged USER_1) on entry. */
+		lv_obj_t *f = lv_group_get_focused(g);
+		if (!f) {
+			lv_group_focus_next(g);
+			f = lv_group_get_focused(g);
+		}
+		if (f && lv_obj_has_flag(f, LV_OBJ_FLAG_USER_1))
 			lv_group_focus_next(g);
 	}
 	lv_screen_load_anim(scr, anim, 250, 0, false);
@@ -351,6 +359,8 @@ void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
 	lv_obj_t *btn = lv_button_create(scr);
 	lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 5, 5);
 	make_focusable(btn);
+	/* Tag as the Back button so nav_to can skip it for initial focus. */
+	lv_obj_add_flag(btn, LV_OBJ_FLAG_USER_1);
 	lv_obj_add_event_cb(btn, back_cb, LV_EVENT_CLICKED, NULL);
 	lv_obj_t *bl = lv_label_create(btn);
 	lv_label_set_text(bl, LV_SYMBOL_LEFT " Back");
@@ -567,6 +577,11 @@ static void build_settings_screen(void)
 	lv_obj_t *list = lv_list_create(settings_screen);
 	lv_obj_set_size(list, lv_pct(96), lv_pct(78));
 	lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -6);
+	/* Inset the buttons from the list edges so the focus outline (drawn a
+	 * few px outside the item) isn't clipped by the list's clip area, and
+	 * add a row gap so a highlighted item's outline clears its neighbours. */
+	lv_obj_set_style_pad_all(list, 8, 0);
+	lv_obj_set_style_pad_row(list, 6, 0);
 
 	make_focusable(lv_list_add_button(list, LV_SYMBOL_IMAGE, "Display")); /* placeholder */
 	make_focusable(lv_list_add_button(list, LV_SYMBOL_AUDIO, "Audio"));   /* placeholder */
