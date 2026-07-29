@@ -2,6 +2,7 @@
 #define APPS_H_
 
 #define APP_MAX_ARGS 8
+#define APP_MAX_ENTRIES 48
 
 /* A discovered, launchable app/game. */
 struct app_entry {
@@ -9,6 +10,7 @@ struct app_entry {
 	char *argv[APP_MAX_ARGS];   /* NULL-terminated; argv[0] is the executable */
 	char  dir[128];             /* working directory, "" for none */
 	char  icon[192];            /* icon file path, "" for none */
+	char  group[32];            /* app/category this belongs to, e.g. "ScummVM" */
 };
 
 /*

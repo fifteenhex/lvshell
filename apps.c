@@ -17,10 +17,11 @@
 
 #include "apps.h"
 
-#define APP_MAX_ENTRIES 48
-
 static struct app_entry entries[APP_MAX_ENTRIES];
 static int              num_entries;
+
+/* The group (app/category) the running discoverer reports its entries under. */
+static const char *cur_group = "";
 
 /* The sink discoverers report through. 'dir' and 'icon' may be NULL. */
 static void apps_add(const char *title, const char *const argv[],
@@ -41,6 +42,7 @@ static void apps_add(const char *title, const char *const argv[],
 		strncpy(e->dir, dir, sizeof(e->dir) - 1);
 	if (icon)
 		strncpy(e->icon, icon, sizeof(e->icon) - 1);
+	strncpy(e->group, cur_group, sizeof(e->group) - 1);
 }
 
 /**********************************************************************************************************************/
@@ -140,6 +142,7 @@ static void discover_doom(void)
 	if (!path_exists(DOOM_EXE))
 		return;
 
+	cur_group = "Doom";
 	for_each_data_file(dirs, exts, doom_found);
 }
 
@@ -220,6 +223,7 @@ static void discover_scummvm(void)
 	if (!path_exists(exe))
 		return;
 
+	cur_group = "ScummVM";
 	fp = popen("scummvm --recursive --path=/data/scummvm --detect 2>/dev/null", "r");
 	if (!fp)
 		return;
@@ -277,6 +281,7 @@ static void discover_mednafen(void)
 	if (!path_exists(MEDNAFEN_EXE))
 		return;
 
+	cur_group = "Mednafen";
 	for_each_data_file(dirs, exts, mednafen_found);
 }
 
