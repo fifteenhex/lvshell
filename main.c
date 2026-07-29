@@ -847,13 +847,15 @@ int main(int argc, char **argv)
 		 * the game to exit (game_poll above resumes everything when it does).
 		 */
 		if (cntx.child_pid > 0) {
+			/* Keep sampling performance so the graph records the game. */
+			performance_poll(true);
 			loop_wait(100);
 			continue;
 		}
 
 		dp_poll();
 		buttontest_poll();
-		performance_poll();
+		performance_poll(false);
 		music_poll();
 		ticker_poll();
 

@@ -13,12 +13,13 @@
 #include "ui.h"
 #include "performance.h"
 
-/* One point per refresh; at ~1 Hz this is a minute of scrolling history. */
-#define PERF_POINTS      60
+/* One point per refresh; at ~1 Hz, 300 points is a 5 minute scrolling window. */
+#define PERF_POINTS      300
 #define PERF_INTERVAL_MS 1000
 
 static lv_obj_t        *perf_cpu_chart;
 static lv_chart_series_t *perf_cpu_ser;
+static lv_chart_series_t *perf_game_ser;   /* marks samples taken while a game ran */
 static lv_obj_t        *perf_cpu_label;
 
 static lv_obj_t        *perf_freq_chart;
@@ -154,9 +155,12 @@ void performance_build(void)
 	lv_obj_set_flex_flow(cont, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(cont, 6, 0);
 
-	/* CPU load (%) */
+	/* CPU load (%). A second red series sits at the top for samples taken
+	 * while a game was running, so game activity is visible on the timeline. */
 	lv_obj_t *b1 = perf_block(cont, "CPU load", &perf_cpu_label);
 	perf_cpu_chart = perf_make_chart(b1, &perf_cpu_ser, LV_PALETTE_GREEN, 0, 100);
+	perf_game_ser = lv_chart_add_series(perf_cpu_chart, lv_palette_main(LV_PALETTE_RED),
+					    LV_CHART_AXIS_PRIMARY_Y);
 
 	/* CPU frequency (MHz) - range filled in from cpufreq if available. */
 	perf_freq_min_khz = read_long_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq");
@@ -177,16 +181,21 @@ void performance_build(void)
 /* Refresh                                                                                                            */
 /**********************************************************************************************************************/
 
-void performance_poll(void)
+void performance_poll(bool game_running)
 {
 	unsigned long long busy, total;
 	long freq_khz, mem_total, mem_avail;
 	uint32_t now;
 
-	/* Only work while the screen is actually visible. */
-	if (!performance_screen || lv_screen_active() != performance_screen)
+	if (!performance_screen)
 		return;
 
+	/*
+	 * Sample on the interval regardless of which screen is showing (and even
+	 * while a game owns the display), so the graph is a continuous 5 minute
+	 * record. The work is tiny - a few /proc reads - and the chart just
+	 * accumulates data that redraws once the screen is next shown.
+	 */
 	now = lv_tick_get();
 	if (perf_have_prev && (now - perf_last_ms) < PERF_INTERVAL_MS)
 		return;
@@ -202,7 +211,11 @@ void performance_poll(void)
 			if (pct > 100)
 				pct = 100;
 			lv_chart_set_next_value(perf_cpu_chart, perf_cpu_ser, pct);
-			lv_label_set_text_fmt(perf_cpu_label, "CPU load: %d%%", pct);
+			/* Red marker pinned at the top for game samples, gap otherwise. */
+			lv_chart_set_next_value(perf_cpu_chart, perf_game_ser,
+						game_running ? 100 : LV_CHART_POINT_NONE);
+			lv_label_set_text_fmt(perf_cpu_label, "CPU load: %d%%%s", pct,
+					      game_running ? "  (game running)" : "");
 		}
 		perf_prev_busy = busy;
 		perf_prev_total = total;
