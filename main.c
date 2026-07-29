@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <poll.h>
 #include <stdarg.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
@@ -27,6 +28,7 @@
 #include "ticker.h"
 #include "buttontest.h"
 #include "performance.h"
+#include "killswitch.h"
 #include "sandbox.h"
 
 struct context {
@@ -207,19 +209,48 @@ static void launch_handler(lv_event_t *e)
 	app_launch(lv_event_get_user_data(e));
 }
 
+/* When non-zero, a kill is in progress: tick when SIGTERM was sent, so a game
+ * that ignores it can be escalated to SIGKILL. */
+static uint32_t game_kill_ms;
+
 /* Reap a finished game, tear down its sandbox, redraw the UI (the game left the
  * framebuffer in its own state) and resume the background music. */
 static void game_poll(void)
 {
 	if (cntx.child_pid <= 0)
 		return;
+
+	/* If a requested quit is being ignored, force it. SIGTERM is preferred
+	 * because an SDL game handles it by shutting down cleanly and releasing
+	 * the DirectFB display back to us; SIGKILL can't and leaves the screen
+	 * blank, but a wedged game leaves no choice. */
+	if (game_kill_ms && lv_tick_elaps(game_kill_ms) >= 4000) {
+		kill(cntx.child_pid, SIGKILL);
+		game_kill_ms = 0;
+	}
+
 	if (waitpid(cntx.child_pid, NULL, WNOHANG) != cntx.child_pid)
 		return;
 	cntx.child_pid = 0;
+	game_kill_ms = 0;
 	sandbox_teardown();
 	lv_obj_invalidate(lv_screen_active());   /* force a full redraw on resume */
 	music_start();
 	evt_emit("exited");
+}
+
+/* Ask the running game to quit (Menu held >10s, or a "kill" on the ctl FIFO).
+ * Sends SIGTERM so the game can tear down its display; game_poll() escalates to
+ * SIGKILL if it doesn't exit, then reaps and resumes the UI. */
+static void game_kill(void)
+{
+	if (cntx.child_pid <= 0)
+		return;
+	evt_emit("killed");
+	kill(cntx.child_pid, SIGTERM);
+	game_kill_ms = lv_tick_get();
+	if (game_kill_ms == 0)   /* reserve 0 for "not killing" */
+		game_kill_ms = 1;
 }
 
 /* The main menu is built on its own screen so a splash can show first. */
@@ -425,6 +456,7 @@ static const char *group_icon(const char *name)
 		{ "WonderSwan",       "ws"      },
 		{ "Doom",             "doom"    },
 		{ "ScummVM",          "scummvm" },
+		{ "PICO-8",           "pico"    },
 		{ NULL, NULL },
 	};
 	static char path[80];
@@ -804,6 +836,8 @@ static void ctl_poll(void)
 		char *arg = strtok_r(NULL, " \t\r\n", &save);
 		ctl_launch(arg ? atoi(arg) : 0);
 	}
+	else if (!strcmp(cmd, "kill"))
+		game_kill();
 }
 
 /*
@@ -864,6 +898,7 @@ int main(int argc, char **argv)
 	build_about_screen();
 	buttontest_build();
 	performance_build();
+	killswitch_init();
 
 	/* Start background chiptune music, if any modules are present. */
 	music_init();
@@ -878,6 +913,11 @@ int main(int argc, char **argv)
 
 		ctl_poll();
 		game_poll();
+
+		/* Menu held >10s force-quits a stuck game (works while it runs, as
+		 * evdev keeps broadcasting the button to us). */
+		if (killswitch_menu_held())
+			game_kill();
 
 		/*
 		 * While a game owns the display, pause the UI entirely: don't run the
