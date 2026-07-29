@@ -6,11 +6,14 @@
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include "lvgl/lvgl.h"
-#include "lvgl/examples/lv_examples.h"
-#include "lvgl/demos/lv_demos.h"
-#include "lv_drivers/sdl/sdl.h"
+#include "lvgl/src/drivers/sdl/lv_sdl_window.h"
+#include "lvgl/src/drivers/sdl/lv_sdl_mouse.h"
+#include "lvgl/src/drivers/sdl/lv_sdl_keyboard.h"
 
 #include "util.h"
+
+#define LVSHELL_HOR_RES 640
+#define LVSHELL_VER_RES 480
 
 enum toplevel_type {
 	TOPLEVELT_RUNCMD,
@@ -40,46 +43,28 @@ struct context {
 
 static struct context cntx;
 
-static lv_indev_drv_t indev_keyboard = { };
-
 static void hal_init_input(void)
 {
-	lv_indev_t *kb_indev;
 	lv_group_t *g = lv_group_create();
-
 	lv_group_set_default(g);
-	lv_indev_drv_init(&indev_keyboard);
-	kb_indev = lv_indev_drv_register(&indev_keyboard);
-	/* Encoder seems wrong but this gives the best fit */
-	indev_keyboard.type = LV_INDEV_TYPE_ENCODER;
-	indev_keyboard.read_cb = sdl_keyboard_read;
+
+	/* Keyboard drives the focus group; mouse allows direct clicks. */
+	lv_indev_t *kb_indev = lv_sdl_keyboard_create();
 	lv_indev_set_group(kb_indev, g);
+
+	lv_sdl_mouse_create();
 }
 
 static void hal_init(void)
 {
-	sdl_init();
+	/* v9's SDL window driver owns the buffers and flush callback. */
+	lv_display_t *disp = lv_sdl_window_create(LVSHELL_HOR_RES, LVSHELL_VER_RES);
 
-	/*Create a display buffer*/
-	static lv_disp_draw_buf_t disp_buf1;
-	static lv_color_t buf1_1[SDL_HOR_RES * 100];
-	lv_disp_draw_buf_init(&disp_buf1, buf1_1, NULL, SDL_HOR_RES * 100);
-
-	/*Create a display*/
-	static lv_disp_drv_t disp_drv;
-	/*Basic initialization*/
-	lv_disp_drv_init(&disp_drv);
-	disp_drv.draw_buf = &disp_buf1;
-	disp_drv.flush_cb = sdl_display_flush;
-	disp_drv.hor_res = SDL_HOR_RES;
-	disp_drv.ver_res = SDL_VER_RES;
-
-	lv_disp_t *disp = lv_disp_drv_register(&disp_drv);
 	lv_theme_t *th = lv_theme_default_init(disp,
 			lv_palette_main(LV_PALETTE_BLUE),
 			lv_palette_main(LV_PALETTE_RED),
-			LV_THEME_DEFAULT_DARK, LV_FONT_DEFAULT);
-	lv_disp_set_theme(disp, th);
+			true, LV_FONT_DEFAULT);
+	lv_display_set_theme(disp, th);
 
 	hal_init_input();
 }
@@ -87,9 +72,8 @@ static void hal_init(void)
 static void top_handler(lv_event_t *e)
 {
 	lv_event_code_t code = lv_event_get_code(e);
-	struct toplevel *tl = e->user_data;
+	struct toplevel *tl = lv_event_get_user_data(e);
 
-	//printf("code: %d\n", code);
 	if (code == LV_EVENT_PRESSED) {
 		switch (tl->type) {
 		case TOPLEVELT_RUNCMD:
@@ -109,22 +93,22 @@ static void top_handler(lv_event_t *e)
 
 static void setup_battery(void)
 {
-	lv_obj_t *batbar = lv_bar_create(lv_scr_act());
+	lv_obj_t *batbar = lv_bar_create(lv_screen_active());
 	lv_obj_set_size(batbar, 35, 10);
 	lv_obj_align(batbar, LV_ALIGN_TOP_RIGHT, -5, 5);
 	lv_bar_set_value(batbar, 50, LV_ANIM_OFF);
 }
 
-static void setup_carousell()
+static void setup_carousell(void)
 {
-	lv_obj_t *panel = lv_obj_create(lv_scr_act());
+	lv_obj_t *panel = lv_obj_create(lv_screen_active());
 	lv_obj_set_size(panel, lv_pct(100), lv_pct(60));
 	lv_obj_set_scroll_snap_x(panel, LV_SCROLL_SNAP_CENTER);
 	lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_ROW);
 	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 
-	for (int i = 0; i < cntx.num_toplevel; i++) {
-		lv_obj_t *btn = lv_btn_create(panel);
+	for (unsigned i = 0; i < cntx.num_toplevel; i++) {
+		lv_obj_t *btn = lv_button_create(panel);
 		lv_obj_set_size(btn, lv_pct(50), lv_pct(100));
 		lv_obj_add_event_cb(btn, top_handler, LV_EVENT_ALL,
 				&cntx.toplevel[i]);
@@ -136,9 +120,9 @@ static void setup_carousell()
 	lv_obj_update_snap(panel, LV_ANIM_ON);
 }
 
-static void setup_screen_tag()
+static void setup_screen_tag(void)
 {
-	lv_obj_t *ltr_label = lv_label_create(lv_scr_act());
+	lv_obj_t *ltr_label = lv_label_create(lv_screen_active());
 	lv_label_set_text(ltr_label,
 			"Miyoo Mini - Less shitty kernel edition.");
 	lv_obj_set_style_text_font(ltr_label, &lv_font_montserrat_16, 0);
@@ -146,7 +130,7 @@ static void setup_screen_tag()
 	lv_obj_align(ltr_label, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
 }
 
-static void setup_ui()
+static void setup_ui(void)
 {
 	setup_battery();
 	setup_screen_tag();
@@ -160,7 +144,6 @@ int main(int argc, char **argv)
 {
 	lv_init();
 	hal_init();
-
 
 	struct toplevel tops[] = {
 		{

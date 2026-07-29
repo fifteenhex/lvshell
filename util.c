@@ -5,12 +5,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-const pid_t util_start_cmd(const char *executable, char * const *args,
+pid_t util_start_cmd(const char *executable, const char * const *args,
 		const char* dir)
 {
 	pid_t pid;
-	int status;
-	char **argp;
+	const char * const *argp;
 	extern char **environ;
 	char **envp;
 	//char *env[16] = NULL;
@@ -42,7 +41,7 @@ const pid_t util_start_cmd(const char *executable, char * const *args,
 			printf("Changing dir to %s\n", dir);
 			chdir(dir);
 		}
-		execve(executable, args, environ);
+		execve(executable, (char * const *)args, environ);
 		/* It's only possible to get here if execve failed */
 		printf("Failed to execve()\n");
 		_Exit(127);

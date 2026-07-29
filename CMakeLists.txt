@@ -1,19 +1,19 @@
-cmake_minimum_required(VERSION 3.10)
-project(lvshell)
+cmake_minimum_required(VERSION 3.12.4)
+project(lvshell C)
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(sdl2 REQUIRED IMPORTED_TARGET sdl2)
+pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 
-INCLUDE_DIRECTORIES(${PROJECT_SOURCE_DIR})
+# So main.c can include "lvgl/..." and lvgl's SDL driver can find <SDL2/SDL.h>.
+include_directories(${PROJECT_SOURCE_DIR} ${SDL2_INCLUDE_DIRS})
 
-file(GLOB_RECURSE INCLUDES "./*.h" )
+# lvshell doesn't use the demos/examples/thorvg; keep the build lean.
+set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory(lvgl)
-add_subdirectory(lv_drivers)
 
-add_executable(lvshell main.c util.c ${SOURCES} ${INCLUDES})
-add_compile_definitions(LV_CONF_INCLUDE_SIMPLE)
-target_link_libraries(lvshell PRIVATE PkgConfig::sdl2 lvgl lvgl::examples lvgl::demos lvgl::drivers)
-install(TARGETS lvshell)
+add_executable(lvshell main.c util.c)
+target_link_libraries(lvshell PRIVATE lvgl PkgConfig::SDL2)
+install(TARGETS lvshell RUNTIME DESTINATION bin)
