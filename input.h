@@ -14,4 +14,8 @@ void input_init(void);
 /* Route the D-pad to a screen's focus group. */
 void input_set_group(lv_group_t *group);
 
+/* Copy the open input-device fds into 'out' (up to 'max'); returns the count.
+ * Used to poll for input so the main loop can wake immediately on a button. */
+int input_get_fds(int *out, int max);
+
 #endif /* INPUT_H_ */

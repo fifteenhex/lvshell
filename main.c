@@ -9,24 +9,22 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <poll.h>
-#include <dirent.h>
-#include <linux/input.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include "lvgl/lvgl.h"
 #include "lvgl/src/drivers/sdl/lv_sdl_window.h"
 #include "lvgl/src/drivers/sdl/lv_sdl_mouse.h"
-#include "lvgl/src/drivers/sdl/lv_sdl_keyboard.h"
 
 #include "apps.h"
 #include "util.h"
 #include "debug.h"
 #include "music.h"
 #include "input.h"
-
-#define LVSHELL_HOR_RES 640
-#define LVSHELL_VER_RES 480
+#include "ui.h"
+#include "background.h"
+#include "ticker.h"
+#include "buttontest.h"
 
 struct context {
 	const struct app_entry *apps;
@@ -70,7 +68,7 @@ static void dbg_init_lvgl(void) { }
  */
 #define MAX_SCREEN_GROUPS 24
 
-static lv_group_t *cur_group;
+lv_group_t *cur_group;
 static lv_style_t  style_focus;
 
 static struct {
@@ -79,7 +77,7 @@ static struct {
 } screen_groups[MAX_SCREEN_GROUPS];
 static int num_screen_groups;
 
-static void focus_style_init(void)
+void focus_style_init(void)
 {
 	lv_style_init(&style_focus);
 	lv_style_set_outline_width(&style_focus, 4);
@@ -90,14 +88,14 @@ static void focus_style_init(void)
 }
 
 /* Highlight 'obj' when it holds focus. */
-static void make_focusable(lv_obj_t *obj)
+void make_focusable(lv_obj_t *obj)
 {
 	lv_obj_add_style(obj, &style_focus, LV_STATE_FOCUSED);
 }
 
 /* Start a fresh focus group for a screen; widgets created afterwards join it
  * (it becomes the default group). */
-static lv_group_t *screen_group_begin(lv_obj_t *scr)
+lv_group_t *screen_group_begin(lv_obj_t *scr)
 {
 	lv_group_t *g = lv_group_create();
 
@@ -110,7 +108,7 @@ static lv_group_t *screen_group_begin(lv_obj_t *scr)
 	return g;
 }
 
-static lv_group_t *group_for_screen(lv_obj_t *scr)
+lv_group_t *group_for_screen(lv_obj_t *scr)
 {
 	for (int i = 0; i < num_screen_groups; i++)
 		if (screen_groups[i].scr == scr)
@@ -158,7 +156,8 @@ static void launch_handler(lv_event_t *e)
 			app->dir[0] ? app->dir : NULL);
 }
 
-/* Reap a finished game and resume the background music. */
+/* Reap a finished game, redraw the UI (the game left the framebuffer in its
+ * own state) and resume the background music. */
 static void game_poll(void)
 {
 	if (cntx.child_pid <= 0)
@@ -166,112 +165,12 @@ static void game_poll(void)
 	if (waitpid(cntx.child_pid, NULL, WNOHANG) != cntx.child_pid)
 		return;
 	cntx.child_pid = 0;
+	lv_obj_invalidate(lv_screen_active());   /* force a full redraw on resume */
 	music_start();
 }
 
 /* The main menu is built on its own screen so a splash can show first. */
-static lv_obj_t *main_screen;
-
-/* ------------------------------------------------------------------------- */
-/* Cracktro-style background: subtle squares spinning and flying across.      */
-/* ------------------------------------------------------------------------- */
-
-#define BG_SQUARES 10
-
-static void bg_anim_x(void *var, int32_t v)
-{
-	lv_obj_set_x((lv_obj_t *)var, v);
-}
-
-static void bg_anim_rot(void *var, int32_t v)
-{
-	lv_obj_set_style_transform_rotation((lv_obj_t *)var, v, 0);
-}
-
-static void setup_background(lv_obj_t *parent)
-{
-	for (int i = 0; i < BG_SQUARES; i++) {
-		int sz = 18 + (i * 11) % 34;
-		lv_obj_t *sq = lv_obj_create(parent);
-		lv_anim_t ax, ar;
-
-		lv_obj_remove_flag(sq, LV_OBJ_FLAG_SCROLLABLE);
-		lv_obj_set_size(sq, sz, sz);
-		lv_obj_set_style_radius(sq, 3, 0);
-		lv_obj_set_style_border_width(sq, 0, 0);
-		lv_obj_set_style_bg_color(sq, lv_palette_main(LV_PALETTE_BLUE), 0);
-		lv_obj_set_style_bg_opa(sq, LV_OPA_20, 0);   /* subtle */
-		lv_obj_set_style_transform_pivot_x(sq, sz / 2, 0);
-		lv_obj_set_style_transform_pivot_y(sq, sz / 2, 0);
-		lv_obj_set_y(sq, (i * 61) % 440);
-		lv_obj_move_background(sq);
-
-		/* Fly left -> right, looping, staggered. */
-		lv_anim_init(&ax);
-		lv_anim_set_var(&ax, sq);
-		lv_anim_set_exec_cb(&ax, bg_anim_x);
-		lv_anim_set_values(&ax, -sz, LVSHELL_HOR_RES);
-		lv_anim_set_duration(&ax, 6000 + (i * 500));
-		lv_anim_set_delay(&ax, i * 350);
-		lv_anim_set_repeat_count(&ax, LV_ANIM_REPEAT_INFINITE);
-		lv_anim_start(&ax);
-
-		/* Spin (angle is in 0.1 degree units). */
-		lv_anim_init(&ar);
-		lv_anim_set_var(&ar, sq);
-		lv_anim_set_exec_cb(&ar, bg_anim_rot);
-		lv_anim_set_values(&ar, 0, 3600);
-		lv_anim_set_duration(&ar, 4000 + (i * 300));
-		lv_anim_set_repeat_count(&ar, LV_ANIM_REPEAT_INFINITE);
-		lv_anim_start(&ar);
-	}
-}
-
-/* Delete a square once it has flown off the screen. */
-static void color_square_done(lv_anim_t *a)
-{
-	lv_obj_delete((lv_obj_t *)a->var);
-}
-
-/* Fling a single fast, randomly-coloured square across the background, then
- * reschedule for a random moment at least a second away (one at a time). */
-static void spawn_color_squares(lv_timer_t *t)
-{
-	lv_obj_t *parent = lv_timer_get_user_data(t);
-	int sz = 12 + rand() % 26;
-	lv_obj_t *sq = lv_obj_create(parent);
-	lv_color_t col = lv_color_make(rand() & 0xff, rand() & 0xff, rand() & 0xff);
-	lv_anim_t ax, ar;
-
-	lv_obj_remove_flag(sq, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_set_size(sq, sz, sz);
-	lv_obj_set_style_radius(sq, 2, 0);
-	lv_obj_set_style_border_width(sq, 0, 0);
-	lv_obj_set_style_bg_color(sq, col, 0);
-	lv_obj_set_style_bg_opa(sq, LV_OPA_70, 0);
-	lv_obj_set_style_transform_pivot_x(sq, sz / 2, 0);
-	lv_obj_set_style_transform_pivot_y(sq, sz / 2, 0);
-	lv_obj_set_y(sq, rand() % LVSHELL_VER_RES);
-	lv_obj_move_background(sq);
-
-	lv_anim_init(&ax);
-	lv_anim_set_var(&ax, sq);
-	lv_anim_set_exec_cb(&ax, bg_anim_x);
-	lv_anim_set_values(&ax, -sz, LVSHELL_HOR_RES + sz);
-	lv_anim_set_duration(&ax, 800 + rand() % 500);   /* fast */
-	lv_anim_set_completed_cb(&ax, color_square_done);
-	lv_anim_start(&ax);
-
-	lv_anim_init(&ar);
-	lv_anim_set_var(&ar, sq);
-	lv_anim_set_exec_cb(&ar, bg_anim_rot);
-	lv_anim_set_values(&ar, 0, 3600);
-	lv_anim_set_duration(&ar, 600 + rand() % 600);
-	lv_anim_set_repeat_count(&ar, LV_ANIM_REPEAT_INFINITE);
-	lv_anim_start(&ar);
-
-	lv_timer_set_period(t, 1000 + rand() % 2500);
-}
+lv_obj_t *main_screen;
 
 static void setup_battery(lv_obj_t *parent)
 {
@@ -337,11 +236,11 @@ static void setup_screen_tag(lv_obj_t *parent)
 /* Settings / About screens                                                                                           */
 /**********************************************************************************************************************/
 
-static lv_obj_t *settings_screen;
-static lv_obj_t *about_screen;
-static lv_obj_t *buttontest_screen;
+lv_obj_t *settings_screen;
+lv_obj_t *about_screen;
+lv_obj_t *buttontest_screen;
 
-static void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
+void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 {
 	lv_group_t *g = group_for_screen(scr);
 
@@ -355,13 +254,13 @@ static void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 	lv_screen_load_anim(scr, anim, 250, 0, false);
 }
 
-static void nav_main(lv_event_t *e)          { (void)e; nav_to(main_screen,     LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
-static void nav_settings(lv_event_t *e)      { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
-static void nav_about(lv_event_t *e)         { (void)e; nav_to(about_screen,    LV_SCR_LOAD_ANIM_MOVE_LEFT); }
-static void nav_back_settings(lv_event_t *e) { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
-static void nav_buttontest(lv_event_t *e)    { (void)e; nav_to(buttontest_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
+void nav_main(lv_event_t *e)          { (void)e; nav_to(main_screen,     LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
+void nav_settings(lv_event_t *e)      { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
+void nav_about(lv_event_t *e)         { (void)e; nav_to(about_screen,    LV_SCR_LOAD_ANIM_MOVE_LEFT); }
+void nav_back_settings(lv_event_t *e) { (void)e; nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT); }
+void nav_buttontest(lv_event_t *e)    { (void)e; nav_to(buttontest_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT); }
 
-static void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
+void make_header(lv_obj_t *scr, const char *title, lv_event_cb_t back_cb)
 {
 	lv_obj_t *btn = lv_button_create(scr);
 	lv_obj_align(btn, LV_ALIGN_TOP_LEFT, 5, 5);
@@ -503,7 +402,7 @@ static void build_group_screens(void)
 		lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 		lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
 		screen_group_begin(scr);
-		setup_background(scr);
+		background_setup(scr);
 		make_header(scr, groups[i].name, nav_main);
 
 		panel = carousel_panel(scr);
@@ -562,272 +461,6 @@ static void build_about_screen(void)
 	about_row(cont, "Hostname", u.nodename);
 }
 
-/**********************************************************************************************************************/
-/* Button test: a live view of the hardware buttons via the input (evdev) layer                                       */
-/**********************************************************************************************************************/
-
-#define BT_MAX_FDS 16
-
-static int       bt_fds[BT_MAX_FDS];
-static int       bt_nfds;
-static lv_obj_t *bt_last_label;
-
-/*
- * Best-effort Miyoo Mini gpio-keys -> label map. Button-to-keycode mapping is
- * firmware specific, so the "Last" readout below always shows the raw code for
- * anything not listed here.
- */
-static const struct bt_btn {
-	int         code;
-	const char *label;
-} bt_buttons[] = {
-	{ KEY_UP,    "Up"     },
-	{ KEY_DOWN,  "Down"   },
-	{ KEY_LEFT,  "Left"   },
-	{ KEY_RIGHT, "Right"  },
-	{ KEY_A,     "A"      },
-	{ KEY_B,     "B"      },
-	{ KEY_X,     "X"      },
-	{ KEY_Y,     "Y"      },
-	{ KEY_Q,     "L1"     },
-	{ KEY_W,     "L2"     },
-	{ KEY_E,     "R1"     },
-	{ KEY_R,     "R2"     },
-	{ KEY_ENTER, "Start"  },
-	{ KEY_ESC,   "Select" },
-	{ KEY_MENU,  "Menu"   },
-	{ KEY_POWER, "Power"  },
-};
-#define BT_NBTN ((int)(sizeof(bt_buttons) / sizeof(bt_buttons[0])))
-
-static lv_obj_t *bt_indicator[BT_NBTN];
-
-static void bt_open(void)
-{
-	DIR *d = opendir("/dev/input");
-	struct dirent *e;
-
-	bt_nfds = 0;
-	if (!d)
-		return;
-	while ((e = readdir(d)) && bt_nfds < BT_MAX_FDS) {
-		char path[64];
-		int fd;
-
-		if (strncmp(e->d_name, "event", 5) != 0)
-			continue;
-		snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
-		/* evdev broadcasts to every reader, so this doesn't steal events
-		 * from the SDL/DirectFB input. */
-		fd = open(path, O_RDONLY | O_NONBLOCK);
-		if (fd >= 0)
-			bt_fds[bt_nfds++] = fd;
-	}
-	closedir(d);
-}
-
-static void bt_event(int code, int down)
-{
-	const char *name = NULL;
-
-	for (int i = 0; i < BT_NBTN; i++) {
-		if (bt_buttons[i].code != code)
-			continue;
-		name = bt_buttons[i].label;
-		if (bt_indicator[i])
-			lv_obj_set_style_bg_color(bt_indicator[i],
-				down ? lv_palette_main(LV_PALETTE_GREEN)
-				     : lv_palette_darken(LV_PALETTE_GREY, 3), 0);
-	}
-
-	if (bt_last_label) {
-		if (name)
-			lv_label_set_text_fmt(bt_last_label, "Last: %s (KEY %d) %s",
-				name, code, down ? "down" : "up");
-		else
-			lv_label_set_text_fmt(bt_last_label, "Last: KEY %d %s",
-				code, down ? "down" : "up");
-	}
-}
-
-static void bt_poll(void)
-{
-	struct input_event ev;
-
-	for (int i = 0; i < bt_nfds; i++)
-		while (read(bt_fds[i], &ev, sizeof(ev)) == (ssize_t)sizeof(ev))
-			if (ev.type == EV_KEY && ev.value != 2)   /* skip autorepeat */
-				bt_event(ev.code, ev.value);
-}
-
-static void build_buttontest_screen(void)
-{
-	lv_obj_t *grid, *hint;
-
-	buttontest_screen = lv_obj_create(NULL);
-	screen_group_begin(buttontest_screen);
-	make_header(buttontest_screen, "Button Test", nav_back_settings);
-
-	grid = lv_obj_create(buttontest_screen);
-	lv_obj_set_size(grid, lv_pct(96), lv_pct(56));
-	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, 45);
-	lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY,
-			LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-	for (int i = 0; i < BT_NBTN; i++) {
-		lv_obj_t *cell = lv_obj_create(grid);
-		lv_obj_t *l;
-
-		lv_obj_set_size(cell, 84, 46);
-		lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
-		lv_obj_set_style_bg_color(cell, lv_palette_darken(LV_PALETTE_GREY, 3), 0);
-		l = lv_label_create(cell);
-		lv_label_set_text(l, bt_buttons[i].label);
-		lv_obj_center(l);
-		bt_indicator[i] = cell;
-	}
-
-	bt_last_label = lv_label_create(buttontest_screen);
-	lv_label_set_text(bt_last_label, "Last: -");
-	lv_obj_align(bt_last_label, LV_ALIGN_BOTTOM_MID, 0, -30);
-
-	hint = lv_label_create(buttontest_screen);
-	lv_label_set_text(hint, "Press a button; its box lights up.");
-	lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
-}
-
-/**********************************************************************************************************************/
-/* Now-playing ticker: the current module name slides in, pauses, slides out                                          */
-/**********************************************************************************************************************/
-
-#define TICKER_SLIDE_MS 900
-#define TICKER_PAUSE_MS 1800
-#define TICKER_MAXCHARS 48
-#define JIGGLE_AMP      5
-
-static lv_obj_t *ticker_cont;                     /* one label per glyph */
-static lv_obj_t *ticker_chars[TICKER_MAXCHARS];
-static int       ticker_nchars;
-static bool      ticker_active;
-static bool      jiggle_on;                       /* wobble the letters? */
-static int32_t   jiggle_amp;                      /* current amplitude, 8.8 fixed */
-
-static void ticker_set_x(void *var, int32_t v) { lv_obj_set_x((lv_obj_t *)var, v); }
-
-/*
- * Wobble the letters on the Y axis, phase-shifted. The amplitude eases toward
- * its target (full while sliding, zero while paused) so starting and stopping
- * the jiggle isn't jarring. Runs off a periodic timer.
- */
-static void jiggle_timer_cb(lv_timer_t *t)
-{
-	int32_t target = jiggle_on ? (JIGGLE_AMP << 8) : 0;
-	uint32_t tick;
-
-	(void)t;
-	jiggle_amp += (target - jiggle_amp) >> 3;   /* exponential ease (~1/8) */
-	if (ticker_nchars == 0)
-		return;
-
-	tick = lv_tick_get();
-	for (int i = 0; i < ticker_nchars; i++) {
-		int32_t ang = (int32_t)((tick / 2 + i * 50) % 360);
-		int32_t off = ((jiggle_amp >> 8) * lv_trigo_sin(ang)) / 32767;
-
-		lv_obj_set_y(ticker_chars[i], JIGGLE_AMP + off);
-	}
-}
-
-/* Resume jiggling when the slide-out starts (one-shot). */
-static void jiggle_resume_cb(lv_timer_t *t)
-{
-	jiggle_on = true;
-	lv_timer_delete(t);
-}
-
-/* Build one label per character; return the total width. */
-static int32_t ticker_build(const char *text)
-{
-	int32_t x = 0;
-
-	lv_obj_clean(ticker_cont);
-	ticker_nchars = 0;
-	for (const char *p = text; *p && ticker_nchars < TICKER_MAXCHARS; p++) {
-		lv_obj_t *c = lv_label_create(ticker_cont);
-		char ch[2] = { *p, 0 };
-
-		lv_obj_set_style_text_font(c, &lv_font_montserrat_16, 0);
-		lv_label_set_text(c, ch);
-		lv_obj_update_layout(c);
-		lv_obj_set_pos(c, x, JIGGLE_AMP);
-		x += lv_obj_get_width(c) + (*p == ' ' ? 3 : 0);
-		ticker_chars[ticker_nchars++] = c;
-	}
-	return x;
-}
-
-static void ticker_out_done(lv_anim_t *a)
-{
-	(void)a;
-	jiggle_on = false;
-	ticker_active = false;   /* ticker_poll() may start the next pass */
-}
-
-/* Reached the centre: pause (calm), then slide off to the left, jiggling. */
-static void ticker_in_done(lv_anim_t *a)
-{
-	int32_t w = lv_obj_get_width(ticker_cont);
-	lv_anim_t out;
-
-	(void)a;
-	jiggle_on = false;   /* calm during the centre pause (eases out) */
-	lv_anim_init(&out);
-	lv_anim_set_var(&out, ticker_cont);
-	lv_anim_set_exec_cb(&out, ticker_set_x);
-	lv_anim_set_values(&out, (LVSHELL_HOR_RES - w) / 2, -w);
-	lv_anim_set_duration(&out, TICKER_SLIDE_MS);
-	lv_anim_set_delay(&out, TICKER_PAUSE_MS);
-	lv_anim_set_path_cb(&out, lv_anim_path_ease_in);
-	lv_anim_set_completed_cb(&out, ticker_out_done);
-	lv_anim_start(&out);
-	/* Jiggle again (eases in) once it starts moving out. */
-	lv_timer_create(jiggle_resume_cb, TICKER_PAUSE_MS, NULL);
-}
-
-/* Slide the name in from the right (decelerating) to the centre, jiggling. */
-static void ticker_start(const char *text)
-{
-	int32_t w = ticker_build(text);
-	lv_anim_t in;
-
-	lv_obj_set_width(ticker_cont, w);
-	lv_anim_init(&in);
-	lv_anim_set_var(&in, ticker_cont);
-	lv_anim_set_exec_cb(&in, ticker_set_x);
-	lv_anim_set_values(&in, LVSHELL_HOR_RES, (LVSHELL_HOR_RES - w) / 2);
-	lv_anim_set_duration(&in, TICKER_SLIDE_MS);
-	lv_anim_set_path_cb(&in, lv_anim_path_ease_out);
-	lv_anim_set_completed_cb(&in, ticker_in_done);
-	lv_anim_start(&in);
-	jiggle_on = true;   /* eases in from flat */
-}
-
-static void ticker_poll(void)
-{
-	const char *name;
-
-	if (ticker_active || !ticker_cont)
-		return;
-	name = music_current();
-	if (!name)
-		return;
-
-	ticker_active = true;
-	ticker_start(name);
-}
-
 static void setup_ui(lv_obj_t *parent)
 {
 	/* The background squares fly off-screen; don't let that add a scrollbar. */
@@ -835,24 +468,11 @@ static void setup_ui(lv_obj_t *parent)
 	lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
 
 	screen_group_begin(parent);
-	setup_background(parent);
+	background_setup(parent);
 	setup_battery(parent);
 	setup_screen_tag(parent);
 	setup_group_carousel(parent);
-
-	/* Now-playing ticker: a transparent strip below the menu, above the corner
-	 * tag, holding one label per letter. Starts off-screen to the right;
-	 * ticker_poll() animates it while music plays. */
-	ticker_cont = lv_obj_create(parent);
-	lv_obj_remove_style_all(ticker_cont);
-	lv_obj_remove_flag(ticker_cont, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_set_size(ticker_cont, 10, 16 + 2 * JIGGLE_AMP);
-	lv_obj_set_y(ticker_cont, LVSHELL_VER_RES - 74);
-	lv_obj_set_x(ticker_cont, LVSHELL_HOR_RES);
-	lv_timer_create(jiggle_timer_cb, 16, NULL);
-
-	/* Occasional bursts of fast, random-coloured squares over the background. */
-	lv_timer_create(spawn_color_squares, 3000, parent);
+	ticker_setup(parent);
 
 	/* Settings button, top-left. */
 	lv_obj_t *sbtn = lv_button_create(parent);
@@ -1096,13 +716,17 @@ static void ctl_poll(void)
  * immediately if input arrives on the control FIFO or an input device. This
  * keeps the UI responsive while not busy-spinning like a fixed usleep.
  */
+#define LOOP_MAX_FDS 20
+
 static void loop_wait(uint32_t timeout_ms)
 {
-	struct pollfd fds[BT_MAX_FDS + 1];
-	int n = 0;
+	struct pollfd fds[LOOP_MAX_FDS];
+	int devfds[LOOP_MAX_FDS - 1];
+	int n = 0, ndev, i;
 
-	for (int i = 0; i < bt_nfds; i++) {
-		fds[n].fd = bt_fds[i];
+	ndev = input_get_fds(devfds, LOOP_MAX_FDS - 1);
+	for (i = 0; i < ndev; i++) {
+		fds[n].fd = devfds[i];
 		fds[n].events = POLLIN;
 		n++;
 	}
@@ -1142,8 +766,7 @@ int main(int argc, char **argv)
 	setup_ui(main_screen);
 	build_settings_screen();
 	build_about_screen();
-	build_buttontest_screen();
-	bt_open();
+	buttontest_build();
 
 	/* Start background chiptune music, if any modules are present. */
 	music_init();
@@ -1156,9 +779,21 @@ int main(int argc, char **argv)
 		uint32_t wait;
 
 		ctl_poll();
-		dp_poll();
-		bt_poll();
 		game_poll();
+
+		/*
+		 * While a game owns the display, pause the UI entirely: don't run the
+		 * animations/rendering (lv_timer_handler) - that both wastes CPU the
+		 * game could use and would block in the DirectFB flush. Just wait for
+		 * the game to exit (game_poll above resumes everything when it does).
+		 */
+		if (cntx.child_pid > 0) {
+			loop_wait(100);
+			continue;
+		}
+
+		dp_poll();
+		buttontest_poll();
 		music_poll();
 		ticker_poll();
 
