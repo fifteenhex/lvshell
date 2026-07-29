@@ -23,6 +23,7 @@
 #include "util.h"
 #include "debug.h"
 #include "music.h"
+#include "input.h"
 
 #define LVSHELL_HOR_RES 640
 #define LVSHELL_VER_RES 480
@@ -69,7 +70,6 @@ static void dbg_init_lvgl(void) { }
  */
 #define MAX_SCREEN_GROUPS 24
 
-static lv_indev_t *kb_indev;
 static lv_group_t *cur_group;
 static lv_style_t  style_focus;
 
@@ -120,8 +120,9 @@ static lv_group_t *group_for_screen(lv_obj_t *scr)
 
 static void hal_init_input(void)
 {
-	/* Keyboard/D-pad drives the focus group; mouse allows direct clicks. */
-	kb_indev = lv_sdl_keyboard_create();
+	/* The D-pad (gpio-keys) drives the focus group via our keypad driver;
+	 * the SDL mouse allows direct clicks (e.g. under the emulator). */
+	input_init();
 	lv_sdl_mouse_create();
 }
 
@@ -346,7 +347,7 @@ static void nav_to(lv_obj_t *scr, lv_screen_load_anim_t anim)
 
 	if (g) {
 		cur_group = g;
-		lv_indev_set_group(kb_indev, g);
+		input_set_group(g);
 		/* Make sure something on the new screen is highlighted. */
 		if (!lv_group_get_focused(g))
 			lv_group_focus_next(g);
@@ -964,7 +965,7 @@ static void splash_done_cb(lv_timer_t *t)
 
 	if (g) {
 		cur_group = g;
-		lv_indev_set_group(kb_indev, g);
+		input_set_group(g);
 		if (!lv_group_get_focused(g))
 			lv_group_focus_next(g);
 	}
