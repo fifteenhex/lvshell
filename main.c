@@ -516,6 +516,7 @@ static const char *group_icon(const char *name)
 		{ "Lynx",             "lynx"    },
 		{ "Neo Geo Pocket",   "ngp"     },
 		{ "WonderSwan",       "ws"      },
+		{ "Commodore 64",     "c64"     },
 		{ "Doom",             "doom"    },
 		{ "ScummVM",          "scummvm" },
 		{ "PICO-8",           "pico"    },
