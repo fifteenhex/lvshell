@@ -67,17 +67,20 @@ static void launch_handler(lv_event_t *e)
 			app->dir[0] ? app->dir : NULL);
 }
 
-static void setup_battery(void)
+/* The main menu is built on its own screen so a splash can show first. */
+static lv_obj_t *main_screen;
+
+static void setup_battery(lv_obj_t *parent)
 {
-	lv_obj_t *batbar = lv_bar_create(lv_screen_active());
+	lv_obj_t *batbar = lv_bar_create(parent);
 	lv_obj_set_size(batbar, 35, 10);
 	lv_obj_align(batbar, LV_ALIGN_TOP_RIGHT, -5, 5);
 	lv_bar_set_value(batbar, 50, LV_ANIM_OFF);
 }
 
-static void setup_carousell(void)
+static void setup_carousell(lv_obj_t *parent)
 {
-	lv_obj_t *panel = lv_obj_create(lv_screen_active());
+	lv_obj_t *panel = lv_obj_create(parent);
 	lv_obj_set_size(panel, lv_pct(100), lv_pct(60));
 	lv_obj_align(panel, LV_ALIGN_CENTER, 0, 0);
 
@@ -109,9 +112,9 @@ static void setup_carousell(void)
 	lv_obj_update_snap(panel, LV_ANIM_ON);
 }
 
-static void setup_screen_tag(void)
+static void setup_screen_tag(lv_obj_t *parent)
 {
-	lv_obj_t *ltr_label = lv_label_create(lv_screen_active());
+	lv_obj_t *ltr_label = lv_label_create(parent);
 	lv_label_set_text(ltr_label,
 			"Miyoo Mini - Less shitty kernel edition.");
 	lv_obj_set_style_text_font(ltr_label, &lv_font_montserrat_16, 0);
@@ -119,11 +122,41 @@ static void setup_screen_tag(void)
 	lv_obj_align(ltr_label, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
 }
 
-static void setup_ui(void)
+static void setup_ui(lv_obj_t *parent)
 {
-	setup_battery();
-	setup_screen_tag();
-	setup_carousell();
+	setup_battery(parent);
+	setup_screen_tag(parent);
+	setup_carousell(parent);
+}
+
+/* Placeholder splash: shown for a moment, then fades to the main menu. */
+#define SPLASH_MS 2000
+
+static void splash_done_cb(lv_timer_t *t)
+{
+	lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
+	lv_timer_delete(t);
+}
+
+static void show_splash(void)
+{
+	lv_obj_t *scr = lv_obj_create(NULL);
+
+	lv_obj_t *title = lv_label_create(scr);
+	lv_label_set_text(title, "lvshell");
+	lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+	lv_obj_align(title, LV_ALIGN_CENTER, 0, -30);
+
+	lv_obj_t *sub = lv_label_create(scr);
+	lv_label_set_text(sub, "Miyoo Mini");
+	lv_obj_align(sub, LV_ALIGN_CENTER, 0, -5);
+
+	lv_obj_t *spinner = lv_spinner_create(scr);
+	lv_obj_set_size(spinner, 44, 44);
+	lv_obj_align(spinner, LV_ALIGN_CENTER, 0, 55);
+
+	lv_screen_load(scr);
+	lv_timer_create(splash_done_cb, SPLASH_MS, NULL);
 }
 
 int main(int argc, char **argv)
@@ -133,7 +166,10 @@ int main(int argc, char **argv)
 
 	cntx.num_apps = apps_discover(&cntx.apps);
 
-	setup_ui();
+	main_screen = lv_obj_create(NULL);
+	setup_ui(main_screen);
+
+	show_splash();
 
 	while (1) {
 		/*
