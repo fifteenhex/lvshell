@@ -323,9 +323,20 @@ static const struct emu_system *cur_sys;
 static void rom_found(const char *dir, const char *name)
 {
 	char path[512];
-	const char *argv[] = { cur_sys->emu, path, NULL };
+	const char *argv[6];
+	int a = 0;
 
 	snprintf(path, sizeof(path), "%s/%s", dir, name);
+
+	argv[a++] = cur_sys->emu;
+	/* mednafen defaults to an oversized window (bigger than the 640x480
+	 * panel); force fullscreen so the picture fits the screen. */
+	if (!strcmp(cur_sys->emu, MEDNAFEN_EXE)) {
+		argv[a++] = "-fs";
+		argv[a++] = "1";
+	}
+	argv[a++] = path;
+	argv[a] = NULL;
 	apps_add(name, argv, NULL, NULL);
 }
 
