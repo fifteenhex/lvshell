@@ -2,57 +2,51 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 #include <stdlib.h>
-#include <stdio.h>
 
+#include "debug.h"
+#include "util.h"
+
+extern char **environ;
+
+/*
+ * Fork and exec 'executable' with 'args' (argv, NULL-terminated), optionally
+ * from working directory 'dir'. Returns the child pid, or -1 on failure to
+ * fork. The child _Exit()s (never returns into shared state) if anything goes
+ * wrong before/at exec.
+ */
 pid_t util_start_cmd(const char *executable, const char * const *args,
-		const char* dir)
+		const char *dir)
 {
 	pid_t pid;
-	const char * const *argp;
-	extern char **environ;
-	char **envp;
-	//char *env[16] = NULL;
-	//int envc = 0;
 
-	if (!executable)
+	if (!executable || !args || !args[0])
 		return -1;
 
-	printf("Starting: %s\n", executable);
-
-	printf("args: \n");
-	for(argp = args; *argp != NULL; argp++)
-		printf("%s ", *argp);
-	printf("\n");
-
-	printf("evn: \n");
-	for(envp = environ; *envp != NULL; envp++){
-		printf("%s ", *envp);
-	}
-	printf("\n");
-
 	pid = fork();
-	/* failed to fork */
-	if (pid == -1)
-		return pid;
-	/* I'm the child */
-	else if (pid == 0) {
-		if(dir) {
-			printf("Changing dir to %s\n", dir);
-			chdir(dir);
-		}
-		execve(executable, (char * const *)args, environ);
-		/* It's only possible to get here if execve failed */
-		printf("Failed to execve()\n");
-		_Exit(127);
-	}
-	/* I'm the parent */
-	else {
-		printf("Forked as: %d\n", pid);
-		return pid;
+	if (pid < 0) {
+		DBG("util: fork failed: %s\n", strerror(errno));
+		return -1;
 	}
 
-	/* shouldn't get here? */
-	return 0;
+	if (pid == 0) {
+		/* Child. */
+		if (dir && chdir(dir) != 0)
+			_Exit(126);   /* couldn't enter the working directory */
+
+		/*
+		 * Don't leak lvshell's file descriptors (DirectFB/SDL, the input
+		 * devices, the control FIFO, the debug log, ...) into the child;
+		 * the target opens its own. Keep only stdin/stdout/stderr.
+		 */
+		for (int fd = 3; fd < 256; fd++)
+			close(fd);
+
+		execve(executable, (char *const *)args, environ);
+		_Exit(127);   /* execve only returns on failure */
+	}
+
+	DBG("util: started %s as pid %d\n", executable, (int)pid);
+	return pid;
 }
-
