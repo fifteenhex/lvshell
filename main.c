@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 /*To fix SDL's "undefined reference to WinMain" issue*/
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -74,6 +75,61 @@ static void launch_handler(lv_event_t *e)
 
 /* The main menu is built on its own screen so a splash can show first. */
 static lv_obj_t *main_screen;
+
+/* ------------------------------------------------------------------------- */
+/* Cracktro-style background: subtle squares spinning and flying across.      */
+/* ------------------------------------------------------------------------- */
+
+#define BG_SQUARES 10
+
+static void bg_anim_x(void *var, int32_t v)
+{
+	lv_obj_set_x((lv_obj_t *)var, v);
+}
+
+static void bg_anim_rot(void *var, int32_t v)
+{
+	lv_obj_set_style_transform_rotation((lv_obj_t *)var, v, 0);
+}
+
+static void setup_background(lv_obj_t *parent)
+{
+	for (int i = 0; i < BG_SQUARES; i++) {
+		int sz = 18 + (i * 11) % 34;
+		lv_obj_t *sq = lv_obj_create(parent);
+		lv_anim_t ax, ar;
+
+		lv_obj_remove_flag(sq, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_set_size(sq, sz, sz);
+		lv_obj_set_style_radius(sq, 3, 0);
+		lv_obj_set_style_border_width(sq, 0, 0);
+		lv_obj_set_style_bg_color(sq, lv_palette_main(LV_PALETTE_BLUE), 0);
+		lv_obj_set_style_bg_opa(sq, LV_OPA_20, 0);   /* subtle */
+		lv_obj_set_style_transform_pivot_x(sq, sz / 2, 0);
+		lv_obj_set_style_transform_pivot_y(sq, sz / 2, 0);
+		lv_obj_set_y(sq, (i * 61) % 440);
+		lv_obj_move_background(sq);
+
+		/* Fly left -> right, looping, staggered. */
+		lv_anim_init(&ax);
+		lv_anim_set_var(&ax, sq);
+		lv_anim_set_exec_cb(&ax, bg_anim_x);
+		lv_anim_set_values(&ax, -sz, LVSHELL_HOR_RES);
+		lv_anim_set_duration(&ax, 6000 + (i * 500));
+		lv_anim_set_delay(&ax, i * 350);
+		lv_anim_set_repeat_count(&ax, LV_ANIM_REPEAT_INFINITE);
+		lv_anim_start(&ax);
+
+		/* Spin (angle is in 0.1 degree units). */
+		lv_anim_init(&ar);
+		lv_anim_set_var(&ar, sq);
+		lv_anim_set_exec_cb(&ar, bg_anim_rot);
+		lv_anim_set_values(&ar, 0, 3600);
+		lv_anim_set_duration(&ar, 4000 + (i * 300));
+		lv_anim_set_repeat_count(&ar, LV_ANIM_REPEAT_INFINITE);
+		lv_anim_start(&ar);
+	}
+}
 
 static void setup_battery(lv_obj_t *parent)
 {
@@ -205,6 +261,11 @@ static void build_about_screen(void)
 
 static void setup_ui(lv_obj_t *parent)
 {
+	/* The background squares fly off-screen; don't let that add a scrollbar. */
+	lv_obj_remove_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
+
+	setup_background(parent);
 	setup_battery(parent);
 	setup_screen_tag(parent);
 	setup_carousell(parent);
@@ -217,6 +278,102 @@ static void setup_ui(lv_obj_t *parent)
 	lv_label_set_text(sl, LV_SYMBOL_SETTINGS);
 }
 
+/**********************************************************************************************************************/
+/* First-boot: offer to create the user data partition                                                                */
+/**********************************************************************************************************************/
+
+static lv_obj_t *dp_modal;
+static lv_obj_t *dp_label;
+static lv_obj_t *dp_buttons;
+static pid_t     dp_pid;
+static bool      dp_should_offer;
+
+static void dp_close(lv_event_t *e)
+{
+	(void)e;
+	if (dp_modal) {
+		lv_obj_delete(dp_modal);
+		dp_modal = NULL;
+	}
+}
+
+static void dp_create_cb(lv_event_t *e)
+{
+	(void)e;
+	if (dp_pid)
+		return;
+
+	dp_pid = fork();
+	if (dp_pid == 0) {
+		execl("/usr/bin/datapart", "datapart", "create", (char *)NULL);
+		_exit(127);
+	}
+
+	lv_label_set_text(dp_label, "Creating data partition, please wait...");
+	if (dp_buttons)
+		lv_obj_add_flag(dp_buttons, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_datapart_dialog(void)
+{
+	lv_obj_t *ok, *skip, *l;
+
+	if (dp_modal)
+		return;
+
+	dp_modal = lv_obj_create(lv_layer_top());
+	lv_obj_set_size(dp_modal, lv_pct(80), LV_SIZE_CONTENT);
+	lv_obj_center(dp_modal);
+	lv_obj_set_flex_flow(dp_modal, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(dp_modal, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	dp_label = lv_label_create(dp_modal);
+	lv_label_set_long_mode(dp_label, LV_LABEL_LONG_WRAP);
+	lv_obj_set_width(dp_label, lv_pct(100));
+	lv_label_set_text(dp_label,
+			"There is free space on your SD card.\n"
+			"Create a data partition (exFAT) for your games and saves?");
+
+	dp_buttons = lv_obj_create(dp_modal);
+	lv_obj_set_size(dp_buttons, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_flex_flow(dp_buttons, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(dp_buttons, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+	skip = lv_button_create(dp_buttons);
+	lv_obj_add_event_cb(skip, dp_close, LV_EVENT_CLICKED, NULL);
+	l = lv_label_create(skip); lv_label_set_text(l, "Skip");
+
+	ok = lv_button_create(dp_buttons);
+	lv_obj_add_event_cb(ok, dp_create_cb, LV_EVENT_CLICKED, NULL);
+	l = lv_label_create(ok); lv_label_set_text(l, "Create");
+}
+
+/* Poll the datapart child; when it finishes, report and offer to dismiss. */
+static void dp_poll(void)
+{
+	int status;
+	lv_obj_t *ok, *l;
+
+	if (dp_pid <= 0)
+		return;
+	if (waitpid(dp_pid, &status, WNOHANG) != dp_pid)
+		return;
+
+	dp_pid = 0;
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+		lv_label_set_text(dp_label, "Data partition created and mounted at /data.");
+	else
+		lv_label_set_text(dp_label, "Could not create the data partition.");
+
+	if (dp_buttons) {
+		lv_obj_clean(dp_buttons);
+		lv_obj_remove_flag(dp_buttons, LV_OBJ_FLAG_HIDDEN);
+		ok = lv_button_create(dp_buttons);
+		lv_obj_add_event_cb(ok, dp_close, LV_EVENT_CLICKED, NULL);
+		l = lv_label_create(ok); lv_label_set_text(l, "OK");
+	}
+}
+
 /* Placeholder splash: shown for a moment, then fades to the main menu. */
 #define SPLASH_MS 2000
 
@@ -224,6 +381,9 @@ static void splash_done_cb(lv_timer_t *t)
 {
 	lv_screen_load_anim(main_screen, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, false);
 	lv_timer_delete(t);
+
+	if (dp_should_offer)
+		show_datapart_dialog();
 }
 
 static void show_splash(void)
@@ -298,6 +458,13 @@ static void ctl_poll(void)
 		nav_to(settings_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT);
 	else if (!strcmp(cmd, "about"))
 		nav_to(about_screen, LV_SCR_LOAD_ANIM_MOVE_LEFT);
+	else if (!strcmp(cmd, "datapart")) {
+		char *arg = strtok_r(NULL, " \t\r\n", &save);
+		if (arg && !strcmp(arg, "create"))
+			dp_create_cb(NULL);
+		else
+			show_datapart_dialog();
+	}
 	else if (!strcmp(cmd, "launch")) {
 		char *arg = strtok_r(NULL, " \t\r\n", &save);
 		ctl_launch(arg ? atoi(arg) : 0);
@@ -310,6 +477,12 @@ int main(int argc, char **argv)
 	hal_init();
 
 	cntx.num_apps = apps_discover(&cntx.apps);
+
+	/* Offer to create the data partition on first boot if there's room. */
+	{
+		int r = system("/usr/bin/datapart check");
+		dp_should_offer = (r != -1 && WIFEXITED(r) && WEXITSTATUS(r) == 0);
+	}
 
 	main_screen = lv_obj_create(NULL);
 	setup_ui(main_screen);
@@ -325,6 +498,7 @@ int main(int argc, char **argv)
 		 * It could be done in a timer interrupt or an OS task too.
 		 */
 		ctl_poll();
+		dp_poll();
 		lv_timer_handler();
 		usleep(5 * 1000);
 	}
