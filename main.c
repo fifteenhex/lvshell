@@ -473,10 +473,14 @@ static void ctl_poll(void)
 
 int main(int argc, char **argv)
 {
+	/*
+	 * Discover apps before we grab the display: the ScummVM discoverer runs
+	 * "scummvm --detect", which itself opens the (single) DirectFB device.
+	 */
+	cntx.num_apps = apps_discover(&cntx.apps);
+
 	lv_init();
 	hal_init();
-
-	cntx.num_apps = apps_discover(&cntx.apps);
 
 	/* Offer to create the data partition on first boot if there's room. */
 	{

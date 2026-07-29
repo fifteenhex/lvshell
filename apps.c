@@ -140,14 +140,77 @@ static void discover_doom(void)
 	for_each_data_file(dirs, exts, doom_found);
 }
 
-/* ScummVM manages its own games through its launcher. */
+/* Split 'line' in place on runs of >= 2 spaces (the column gaps in scummvm's
+ * --detect table) into up to 'max' fields. */
+static int split_columns(char *line, char **fields, int max)
+{
+	int n = 0;
+	char *p = line;
+
+	while (*p && n < max) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (!*p || *p == '\n')
+			break;
+		fields[n++] = p;
+		while (*p && *p != '\n' && !(p[0] == ' ' && p[1] == ' '))
+			p++;
+		if (*p)
+			*p++ = 0;
+	}
+
+	for (int i = 0; i < n; i++) {
+		char *e = fields[i] + strlen(fields[i]);
+		while (e > fields[i] && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\n'))
+			*--e = 0;
+	}
+	return n;
+}
+
+/*
+ * ScummVM: ask it which games live under the data dir (no hardcoded game list)
+ * and add one entry each, launching the game directly instead of the launcher.
+ */
 static void discover_scummvm(void)
 {
 	static const char *exe = "/usr/bin/scummvm";
-	const char *argv[] = { exe, NULL };
+	FILE *fp;
+	char line[1024];
+	bool in_table = false;
 
-	if (path_exists(exe))
-		apps_add("ScummVM", argv, NULL);
+	if (!path_exists(exe))
+		return;
+
+	fp = popen("scummvm --recursive --path=/data/scummvm --detect 2>/dev/null", "r");
+	if (!fp)
+		return;
+
+	while (fgets(line, sizeof(line), fp)) {
+		char *f[3];
+		char pathopt[600];
+		const char *argv[4];
+
+		/* Skip everything before the "GameID  Description  Full Path" header. */
+		if (!in_table) {
+			if (strncmp(line, "GameID", 6) == 0)
+				in_table = true;
+			continue;
+		}
+		if (line[0] == '-' || line[0] == '\n')
+			continue;
+		if (split_columns(line, f, 3) < 3)
+			continue;
+
+		/* f[0]=game id, f[1]=description, f[2]=full path */
+		snprintf(pathopt, sizeof(pathopt), "--path=%s", f[2]);
+		argv[0] = exe;
+		argv[1] = pathopt;
+		argv[2] = "--auto-detect";
+		argv[3] = NULL;
+		apps_add(f[1], argv, NULL);
+	}
+
+	pclose(fp);
 }
 
 /* Mednafen: one entry per ROM found. */
