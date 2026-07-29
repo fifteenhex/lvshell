@@ -404,6 +404,41 @@ static void group_open_cb(lv_event_t *e)
 	nav_to(lv_event_get_user_data(e), LV_SCR_LOAD_ANIM_MOVE_LEFT);
 }
 
+/*
+ * Map a menu group (emulated system / app) to its console icon, installed by
+ * the retro-game-console-icons package as /usr/share/console-icons/<code>.png.
+ * Returns NULL if there is no icon for the group or it isn't installed.
+ */
+static const char *group_icon(const char *name)
+{
+	static const struct { const char *name; const char *code; } map[] = {
+		{ "NES",              "fc"      },
+		{ "Megadrive",        "md"      },
+		{ "SNES",             "sfc"     },
+		{ "Game Boy",         "gb"      },
+		{ "Game Boy Advance", "gba"     },
+		{ "Master System",    "ms"      },
+		{ "Game Gear",        "gg"      },
+		{ "PC Engine",        "pce"     },
+		{ "Lynx",             "lynx"    },
+		{ "Neo Geo Pocket",   "ngp"     },
+		{ "WonderSwan",       "ws"      },
+		{ "Doom",             "doom"    },
+		{ "ScummVM",          "scummvm" },
+		{ NULL, NULL },
+	};
+	static char path[80];
+	int i;
+
+	for (i = 0; map[i].name; i++) {
+		if (strcmp(name, map[i].name))
+			continue;
+		snprintf(path, sizeof(path), "/usr/share/console-icons/%s.png", map[i].code);
+		return access(path, F_OK) == 0 ? path : NULL;
+	}
+	return NULL;
+}
+
 /* One app group; clicking it opens that group's screen. */
 static void add_group_card(lv_obj_t *panel, struct app_group *grp)
 {
@@ -415,11 +450,15 @@ static void add_group_card(lv_obj_t *panel, struct app_group *grp)
 	make_focusable(btn);
 	lv_obj_add_event_cb(btn, group_open_cb, LV_EVENT_CLICKED, grp->screen);
 
-	/* Represent the group with its first member's cover, if any. */
-	for (int i = 0; i < grp->count; i++) {
-		if (grp->members[i]->icon[0]) {
-			icon = grp->members[i]->icon;
-			break;
+	/* Prefer the system's console icon; otherwise fall back to the first
+	 * member's cover art (e.g. a ScummVM game cover), if any. */
+	icon = group_icon(grp->name);
+	if (!icon) {
+		for (int i = 0; i < grp->count; i++) {
+			if (grp->members[i]->icon[0]) {
+				icon = grp->members[i]->icon;
+				break;
+			}
 		}
 	}
 	card_add_icon(btn, icon);
